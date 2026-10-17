@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import type RAPIER from '@dimforge/rapier3d-compat';
 import { buildHeightmap, sampleHeight } from '../heightmap.ts';
 import { DESERT, createTerrainMesh } from '../terrain.ts';
+import { BAJA_LOOK } from '../terrainLook.ts';
 import { type Atmosphere, type Ground, SUNNY, type Venue, onGround, scatterRocks, venueColliders } from '../venue.ts';
 
 // Baja: open desert, 1.28 km across, with dunes, mesas and washes. No track: a chain of waypoints
@@ -107,7 +108,7 @@ export function buildBaja(world: RAPIER.World): Venue {
   });
   const keepClear = [...WAYPOINTS, START].map(([x, z]) => ({ x, z, r: 50 }));
   const root = new THREE.Group();
-  root.add(createTerrainMesh(hm, DESERT, 8), scatterRocks(hm, 700, 0x8b6248, keepClear, 777), ...markers);
+  root.add(createTerrainMesh(hm, DESERT, 8, BAJA_LOOK), scatterRocks(hm, 700, 0x8b6248, keepClear, 777), ...markers);
   return {
     ...ground,
     id: 'baja',

@@ -34,6 +34,8 @@ export interface Settings {
   controlScheme: 'easy' | 'advanced';
   /** The detailed Honda CRF 450, or the original low-detail bike. */
   bikeModel: 'crf450' | 'classic';
+  /** Retro: the original flat-coloured ground instead of the realistic one. */
+  retro: boolean;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -55,6 +57,7 @@ export const DEFAULT_SETTINGS: Settings = {
   playerName: 'Rider',
   controlScheme: 'advanced',
   bikeModel: 'crf450',
+  retro: false,
 };
 
 const KEY = 'motocross-bobness:settings';

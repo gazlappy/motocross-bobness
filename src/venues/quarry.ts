@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import type RAPIER from '@dimforge/rapier3d-compat';
 import { buildHeightmap } from '../heightmap.ts';
 import { type TerrainPalette, createTerrainMesh } from '../terrain.ts';
+import { QUARRY_LOOK } from '../terrainLook.ts';
 import { type Atmosphere, type Ground, SUNNY, type Venue, onGround, scatterRocks, venueColliders } from '../venue.ts';
 
 // The Stunt Quarry: "monstrous arenas of hills optimally placed for stunt jumping". Big kickers aimed
@@ -86,7 +87,7 @@ export function buildQuarry(world: RAPIER.World): Venue {
   const ground = quarryGround();
   const hm = ground.hm;
   const root = new THREE.Group();
-  root.add(createTerrainMesh(hm, STONE, 7), scatterRocks(hm, 160, 0x7d7468, [{ x: 0, z: 0, r: 40 }], 99));
+  root.add(createTerrainMesh(hm, STONE, 7, QUARRY_LOOK), scatterRocks(hm, 160, 0x7d7468, [{ x: 0, z: 0, r: 40 }], 99));
   return {
     ...ground,
     id: 'quarry',

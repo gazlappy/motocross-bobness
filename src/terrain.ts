@@ -2,6 +2,8 @@ import * as THREE from 'three';
 import RAPIER from '@dimforge/rapier3d-compat';
 import { Noise2D } from './noise.ts';
 import { type Heightmap, rapierHeights } from './heightmap.ts';
+import { type GroundLook, NATIONALS_LOOK, createGroundMaterial } from './terrainLook.ts';
+import { createGrass } from './grass.ts';
 
 /** Ground colours for a venue. */
 export interface TerrainPalette {
@@ -50,7 +52,10 @@ function makeDetailTexture() {
   return tex;
 }
 
-export function createTerrainMesh(hm: Heightmap, palette: TerrainPalette = DESERT, uvScale = 6) {
+/** Retro: the original flat colours. Otherwise: blended photo materials (see terrainLook.ts). */
+export type TerrainStyle = 'retro' | 'real';
+
+export function createTerrainMesh(hm: Heightmap, palette: TerrainPalette = DESERT, uvScale = 6, look: GroundLook = NATIONALS_LOOK) {
   const SAND = new THREE.Color(palette.base), GRASS = new THREE.Color(palette.grass);
   const DIRT = new THREE.Color(palette.dirt), TRACK = new THREE.Color(palette.track), ROCK = new THREE.Color(palette.rock);
   const n = hm.cells + 1;
@@ -58,6 +63,8 @@ export function createTerrainMesh(hm: Heightmap, palette: TerrainPalette = DESER
   const positions = new Float32Array(n * n * 3);
   const uvs = new Float32Array(n * n * 2);
   const colors = new Float32Array(n * n * 3);
+  /** How much grass, dirt, racing line and rock cover each vertex (realistic style). */
+  const splat = new Float32Array(n * n * 4);
   const patch = new Noise2D(31);
   const h = hm.heights;
   const c = new THREE.Color();
@@ -75,16 +82,21 @@ export function createTerrainMesh(hm: Heightmap, palette: TerrainPalette = DESER
       const slope = Math.hypot(hx, hz) / (2 * hm.cellSize);
 
       c.copy(SAND);
-      const grassy = THREE.MathUtils.smoothstep(patch.fbm(x / 60, z / 60, 3), 0.05, 0.35);
-      c.lerp(GRASS, grassy * palette.grassAmount);
-      c.lerp(DIRT, THREE.MathUtils.smoothstep(patch.fbm(x / 25 + 5, z / 25, 2), 0.1, 0.5) * palette.dirtAmount);
+      const grass = THREE.MathUtils.smoothstep(patch.fbm(x / 60, z / 60, 3), 0.05, 0.35) * palette.grassAmount;
+      c.lerp(GRASS, grass);
+      const dirt = THREE.MathUtils.smoothstep(patch.fbm(x / 25 + 5, z / 25, 2), 0.1, 0.5) * palette.dirtAmount;
+      c.lerp(DIRT, dirt);
       // Worked dirt on the racing surface, fading out over the shoulders.
+      let track = 0;
       if (hm.track) {
         const W = hm.track.halfWidth;
-        c.lerp(TRACK, 0.85 * (1 - THREE.MathUtils.smoothstep(hm.trackDistance[i], W, W + 3)));
+        track = 1 - THREE.MathUtils.smoothstep(hm.trackDistance[i], W, W + 3);
+        c.lerp(TRACK, 0.85 * track);
       }
-      c.lerp(ROCK, THREE.MathUtils.smoothstep(slope, 0.55, 1.1));
+      const rock = THREE.MathUtils.smoothstep(slope, 0.55, 1.1);
+      c.lerp(ROCK, rock);
       colors.set([c.r, c.g, c.b], i * 3);
+      splat.set([grass, dirt, track, rock], i * 4);
     }
   }
 
@@ -102,13 +114,33 @@ export function createTerrainMesh(hm: Heightmap, palette: TerrainPalette = DESER
   geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
   geo.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
   geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  geo.setAttribute('splat', new THREE.BufferAttribute(splat, 4));
   geo.setIndex(new THREE.BufferAttribute(indices, 1));
   geo.computeVertexNormals();
 
-  const mat = new THREE.MeshLambertMaterial({ vertexColors: true, map: makeDetailTexture() });
-  const mesh = new THREE.Mesh(geo, mat);
+  const retro = new THREE.MeshLambertMaterial({ vertexColors: true, map: makeDetailTexture() });
+  const mesh = new THREE.Mesh(geo, retro);
   mesh.receiveShadow = true;
+  // The realistic material is made on first use (it loads textures); tufts only show with it.
+  mesh.userData.terrain = { retro, real: null as THREE.Material | null, look };
+  if (look.tufts) {
+    const grass = createGrass(hm, mesh, look.tufts);
+    grass.visible = false;
+    grass.userData.realOnly = true;
+    mesh.add(grass);
+  }
   return mesh;
+}
+
+/** Switch every terrain under `root` between the retro and realistic looks. */
+export function setTerrainStyle(root: THREE.Object3D, style: TerrainStyle) {
+  root.traverse((o) => {
+    const t = o.userData.terrain as { retro: THREE.Material; real: THREE.Material | null; look: GroundLook } | undefined;
+    if (!t) return;
+    if (style === 'real' && !t.real) t.real = createGroundMaterial(t.look);
+    (o as THREE.Mesh).material = style === 'real' ? t.real! : t.retro;
+    for (const child of o.children) if (child.userData.realOnly) child.visible = style === 'real';
+  });
 }
 
 export function createTerrainCollider(world: RAPIER.World, hm: Heightmap) {

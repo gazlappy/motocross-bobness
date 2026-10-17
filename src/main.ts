@@ -17,6 +17,7 @@ import { StuntChallenge } from './stuntChallenge.ts';
 import type { Venue, VenueId } from './venue.ts';
 import { buildVenue } from './venues/index.ts';
 import { PoseInterpolator } from './interpolation.ts';
+import { setTerrainStyle } from './terrain.ts';
 import { type EventPayout, SEASON, TIERS, eventConfig, loadCareer, money, recordEvent } from './career.ts';
 import { TagGame } from './tag.ts';
 import { Lobby } from './net/lobby.ts';
@@ -108,6 +109,7 @@ async function getVenue(id: VenueId) {
 /** Show one venue: its scenery and colliders on, every other venue's off, its sky and lighting. */
 function useVenue(v: Venue) {
   venue = v;
+  setTerrainStyle(v.root, settings.retro ? 'retro' : 'real');
   for (const other of venues.values()) {
     const on = other === v;
     other.root.visible = on;
@@ -393,6 +395,7 @@ function helpHtml() {
 }
 
 function applySettings(s: Settings) {
+  if (venue) setTerrainStyle(venue.root, s.retro ? 'retro' : 'real');
   sound.setVolume(s.volume);
   if (sound.isMuted !== s.muted) sound.toggleMute();
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2) * s.resolution);

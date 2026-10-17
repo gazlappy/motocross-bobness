@@ -3,6 +3,7 @@ import RAPIER from '@dimforge/rapier3d-compat';
 import { buildHeightmap } from '../heightmap.ts';
 import { type TerrainPalette, createTerrainMesh } from '../terrain.ts';
 import { createTrackDressing } from '../trackDressing.ts';
+import { SUPERCROSS_LOOK } from '../terrainLook.ts';
 import { Race } from '../race.ts';
 import { type Jump, Track, type TrackDef } from '../track.ts';
 import { type Atmosphere, type Ground, type Venue, onGround, venueColliders } from '../venue.ts';
@@ -174,7 +175,7 @@ export function buildSupercross(world: RAPIER.World): Venue {
   const ground = supercrossGround();
   const hm = ground.hm;
   const root = new THREE.Group();
-  root.add(createTerrainMesh(hm, LOAM, 4), createTrackDressing(hm, hm.track!, 'stadium'), stadium());
+  root.add(createTerrainMesh(hm, LOAM, 4, SUPERCROSS_LOOK), createTrackDressing(hm, hm.track!, 'stadium'), stadium());
   return {
     ...ground,
     id: 'supercross',

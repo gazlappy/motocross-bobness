@@ -16,6 +16,12 @@
   The game's default bike (`assets/models/Bike/free_honda_crf_450_1k.glb`, the smaller-texture download),
   recoloured per rider.
 
+## Textures
+
+- Ground materials from [Poly Haven](https://polyhaven.com) (CC0): Sparse Grass, Aerial Mud 1, Brown Mud Dry,
+  Rocky Terrain 02, Aerial Sand, Red Dirt Mud 01, Gravelly Sand. In `assets/textures/terrain/`, re-compressed
+  (colour maps 1024 px, normal maps 512 px).
+
 ## Libraries
 
 - [three.js](https://threejs.org) (MIT), [Rapier](https://rapier.rs) (Apache-2.0), [PeerJS](https://peerjs.com) (MIT), [Vite](https://vite.dev) (MIT).
