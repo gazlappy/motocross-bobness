@@ -16,34 +16,89 @@ const AXLE_MID_Z = (-0.82 + 0.66) / 2;
 /** Axle height in bike space at rest: attach y 0.12 less the sagged suspension (~0.14 m). */
 const AXLE_REST_Y = 0.12 - (0.42 + WHEEL_RADIUS - 0.142 - WHEEL_RADIUS);
 
-/** How each colour is made from the red plastics (canvas filters). */
-const RECOLOUR: Record<BikeColour, string> = {
-  red: 'none',
-  orange: 'hue-rotate(28deg) saturate(1.2)',
-  yellow: 'hue-rotate(52deg) saturate(1.25) brightness(1.25)',
-  green: 'hue-rotate(115deg) brightness(0.9)',
-  blue: 'hue-rotate(218deg) brightness(1.05)',
-  white: 'saturate(0) brightness(2.1)',
-  black: 'saturate(0) brightness(0.4)',
+/** Furthest the fork slider can travel up the tubes, metres. */
+const FORK_MAX_TRAVEL = 0.28;
+
+/** Each rider's colour: the same as their kit. Red keeps the model's own plastics. */
+const TARGET: Record<BikeColour, number | null> = {
+  red: null, orange: 0xf07a1a, yellow: 0xf2c418, green: 0x2f9e3a, blue: 0x1f5fd1, white: 0xe8e8e8, black: 0x2a2a2e,
 };
 /** Materials that carry the red plastics. */
 const PLASTICS = ['hondared', 'fenders', 'shrouds', 'numberplates', 'seat', 'forkguard'];
+/** HSL lightness of the Honda's plastic red: shading is measured relative to it. */
+const RED_LIGHTNESS = 0.43;
 
 const key = (name: string) => name.toLowerCase().replace(/[^a-z]/g, '');
+const smooth = (a: number, b: number, x: number) => {
+  const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
+  return t * t * (3 - 2 * t);
+};
+
+/** How red a pixel is (0..1) and its shade relative to the plastic red. */
+function redness(r: number, g: number, b: number) {
+  const max = Math.max(r, g, b), min = Math.min(r, g, b);
+  const l = (max + min) / 2;
+  const s = max === min ? 0 : l > 0.5 ? (max - min) / (2 - max - min) : (max - min) / (max + min);
+  let hue = 0;
+  if (max !== min) {
+    if (max === r) hue = ((g - b) / (max - min)) * 60;
+    else if (max === g) hue = ((b - r) / (max - min)) * 60 + 120;
+    else hue = ((r - g) / (max - min)) * 60 + 240;
+  }
+  hue = ((hue % 360) + 360) % 360;
+  const fromRed = Math.min(hue, 360 - hue);
+  return { weight: smooth(0.25, 0.45, s) * (1 - smooth(18, 32, fromRed)), shade: Math.min(2.2, l / RED_LIGHTNESS) };
+}
+
+/** Per texture image: its pixels plus how red each one is, worked out once and reused for every colour. */
+const masks = new WeakMap<object, { pixels: ImageData; weight: Float32Array; shade: Float32Array }>();
+
+function redMask(img: CanvasImageSource & { width: number; height: number }) {
+  let mask = masks.get(img);
+  if (mask) return mask;
+  const canvas = document.createElement('canvas');
+  canvas.width = img.width;
+  canvas.height = img.height;
+  const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
+  ctx.drawImage(img, 0, 0);
+  const pixels = ctx.getImageData(0, 0, img.width, img.height);
+  const n = img.width * img.height;
+  const weight = new Float32Array(n), shade = new Float32Array(n);
+  const d = pixels.data;
+  for (let i = 0; i < n; i++) {
+    const r = redness(d[i * 4] / 255, d[i * 4 + 1] / 255, d[i * 4 + 2] / 255);
+    weight[i] = r.weight;
+    shade[i] = r.shade;
+  }
+  mask = { pixels, weight, shade };
+  masks.set(img, mask);
+  return mask;
+}
 
 const recoloured = new Map<string, THREE.Texture>();
 
+/** The texture with its red plastic swapped for the rider's colour, keeping the light and shade. */
 function recolourTexture(tex: THREE.Texture, colour: BikeColour, id: string) {
   const cacheKey = `${colour}:${id}`;
   let out = recoloured.get(cacheKey);
   if (!out) {
-    const img = tex.image as CanvasImageSource & { width: number; height: number };
+    const { pixels, weight, shade } = redMask(tex.image as CanvasImageSource & { width: number; height: number });
+    const hex = TARGET[colour]!; // sRGB, like the texture pixels
+    const sr = (hex >> 16) & 255, sg = (hex >> 8) & 255, sb = hex & 255;
     const canvas = document.createElement('canvas');
-    canvas.width = img.width;
-    canvas.height = img.height;
+    canvas.width = pixels.width;
+    canvas.height = pixels.height;
     const ctx = canvas.getContext('2d')!;
-    ctx.filter = RECOLOUR[colour];
-    ctx.drawImage(img, 0, 0);
+    const img = ctx.createImageData(pixels.width, pixels.height);
+    const src = pixels.data, dst = img.data;
+    for (let i = 0; i < weight.length; i++) {
+      const w = weight[i], k = shade[i], j = i * 4;
+      dst[j] = src[j] + (Math.min(255, sr * k) - src[j]) * w;
+      dst[j + 1] = src[j + 1] + (Math.min(255, sg * k) - src[j + 1]) * w;
+      dst[j + 2] = src[j + 2] + (Math.min(255, sb * k) - src[j + 2]) * w;
+      dst[j + 3] = src[j + 3];
+    }
+    ctx.putImageData(img, 0, 0);
     out = new THREE.CanvasTexture(canvas);
     out.colorSpace = tex.colorSpace;
     out.flipY = tex.flipY;
@@ -55,15 +110,14 @@ function recolourTexture(tex: THREE.Texture, colour: BikeColour, id: string) {
   return out;
 }
 
+/** A plain (untextured) red material colour, swapped the same way. */
 function recolourColor(c: THREE.Color, colour: BikeColour) {
-  const canvas = document.createElement('canvas');
-  canvas.width = canvas.height = 1;
-  const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
-  ctx.filter = RECOLOUR[colour];
-  ctx.fillStyle = `#${c.getHexString(THREE.SRGBColorSpace)}`;
-  ctx.fillRect(0, 0, 1, 1);
-  const [r, g, b] = ctx.getImageData(0, 0, 1, 1).data;
-  return new THREE.Color().setRGB(r / 255, g / 255, b / 255, THREE.SRGBColorSpace);
+  const hex = c.getHex(THREE.SRGBColorSpace);
+  const [r, g, b] = [(hex >> 16) & 255, (hex >> 8) & 255, hex & 255].map((v) => v / 255);
+  const { weight, shade } = redness(r, g, b);
+  const t = TARGET[colour]!;
+  const mix = (orig: number, to: number) => orig + (Math.min(1, (to / 255) * shade) - orig) * weight;
+  return new THREE.Color().setRGB(mix(r, (t >> 16) & 255), mix(g, (t >> 8) & 255), mix(b, t & 255), THREE.SRGBColorSpace);
 }
 
 /** Bones that move independently; everything else is the frame. */
@@ -271,7 +325,9 @@ export class HondaBikeModel {
     const wheelY = (w: (typeof bike.wheels)[number]) => w.attach.y - (w.rayLength - WHEEL_RADIUS);
 
     this.steer.set(-bike.steerAngle);
-    const travel = (wheelY(front) - AXLE_REST_Y) / this.forkLift;
+    // The model's fork is built near full extension (the tubes barely overlap the fork guards), so
+    // it can compress but not extend: in the air the wheel stays put rather than pulling apart.
+    const travel = THREE.MathUtils.clamp((wheelY(front) - AXLE_REST_Y) / this.forkLift, 0, FORK_MAX_TRAVEL);
     this.slider.position.copy(this.sliderRest).addScaledVector(this.sliderPerMetre, travel);
 
     const sin = THREE.MathUtils.clamp((wheelY(rear) - this.pivot.y) / this.armLength, -1, 1);

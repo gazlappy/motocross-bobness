@@ -24,7 +24,7 @@ import type { NetSetup, RosterEntry } from './net/protocol.ts';
 import type { Racer } from './competition.ts';
 import bikeUrl from '../assets/models/Bike/mid_poly_dirt_bike.glb?url';
 import hondaUrl from '../assets/models/Bike/free_honda_crf_450_1k.glb?url';
-import riderUrl from '../assets/models/Rider/low-poly_motocross_character_rigged.glb?url';
+import riderUrl from '../assets/models/Rider/mx_rider.glb?url';
 
 const PHYSICS_DT = 1 / 120;
 const MAX_STEPS_PER_FRAME = 6;

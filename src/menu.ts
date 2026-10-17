@@ -339,10 +339,10 @@ export class Menu {
     this.panel.append(el('div', 'credits',
       `<p><b>Motocross Bobness</b><br>A browser tribute to <i>Motocross Madness</i> (1998) by Rainbow Studios,
        published by Microsoft. Not affiliated with or endorsed by either.</p>
-       <p><b>3D models</b> (CC BY 4.0)<br>
+       <p><b>Bikes</b> (CC BY 4.0)<br>
        "Mid poly dirt bike" by <a href="https://sketchfab.com/danilloribeiro" target="_blank" rel="noopener">danilloribeiro</a><br>
-       "Low-poly Motocross Character (rigged)" by <a href="https://sketchfab.com/XHeheX" target="_blank" rel="noopener">XHeheX</a><br>
        "(FREE) Honda CRF 450" by <a href="https://skfb.ly/oFqPG" target="_blank" rel="noopener">Jacobdesigns</a></p>
+       <p><b>Rider</b><br>Built for the game in Blender, rigged with Adobe Mixamo</p>
        <p><b>Built with</b><br>three.js · Rapier physics · Vite · TypeScript</p>
        <p><b>Sound</b><br>Engine, wind, tyres and crashes are synthesised live in the browser.</p>`));
     this.button('Back', () => this.back(), 'menu-btn small');

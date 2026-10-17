@@ -67,4 +67,4 @@ Crashes: land on your head, nose-dive, loop out, land flat from very high or get
 
 Stack: TypeScript, Vite, Three.js, Rapier (WASM physics).
 
-Models: free CC-BY models from Sketchfab (see [CREDITS.md](CREDITS.md)), in `assets/models/`. The bike is the rigged Honda CRF 450 (steering, fork, swingarm and wheels driven by the physics; its red plastics are hue-shifted for the other six colours); **Options > Bike model** switches back to the original low-detail bike, which has 7 colour variants built in. `node scripts/inspect-glb.ts <file.glb>` prints a model's parts and skeleton.
+Models: free CC-BY models from Sketchfab (see [CREDITS.md](CREDITS.md)), in `assets/models/`. The bike is the rigged Honda CRF 450 (steering, fork, swingarm and wheels driven by the physics; its red plastics are recoloured to match each rider's kit); **Options > Bike model** switches back to the original low-detail bike, which has 7 colour variants built in. The rider is our own low-poly model (Blender, rigged with Mixamo); the physics poses its Mixamo skeleton each frame, and the ragdoll drives it in crashes. `node scripts/inspect-glb.ts <file.glb>` prints a model's parts and skeleton.
