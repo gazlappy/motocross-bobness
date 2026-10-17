@@ -318,6 +318,7 @@ export class Menu {
       this.segmented('Speed in', ['mph', 'kmh'], st.units, (v) => this.set({ units: v as Settings['units'] }), (v) => (v === 'kmh' ? 'km/h' : 'mph')),
       this.segmented('Gearbox', ['auto', 'manual'], st.gearbox, (v) => this.set({ gearbox: v as Settings['gearbox'] })),
       this.segmented('Camera', ['chase', 'far', 'helmet', 'thrill'], st.camera, (v) => this.set({ camera: v as Settings['camera'] })),
+      this.segmented('Bike model', ['crf450', 'classic'], st.bikeModel, (v) => this.set({ bikeModel: v as Settings['bikeModel'] }), (v) => (v === 'crf450' ? 'CRF 450' : 'Classic')),
       this.segmented('Shadows', ['on', 'off'], st.shadows ? 'on' : 'off', (v) => this.set({ shadows: v === 'on' })),
       this.segmented('Resolution', [1, 0.75, 0.5], st.resolution, (v) => this.set({ resolution: v }), (v) => `${v * 100}%`),
       this.segmented('Controls help', ['show', 'hide'], st.showHelp ? 'show' : 'hide', (v) => this.set({ showHelp: v === 'show' })),
@@ -340,7 +341,8 @@ export class Menu {
        published by Microsoft. Not affiliated with or endorsed by either.</p>
        <p><b>3D models</b> (CC BY 4.0)<br>
        "Mid poly dirt bike" by <a href="https://sketchfab.com/danilloribeiro" target="_blank" rel="noopener">danilloribeiro</a><br>
-       "Low-poly Motocross Character (rigged)" by <a href="https://sketchfab.com/XHeheX" target="_blank" rel="noopener">XHeheX</a></p>
+       "Low-poly Motocross Character (rigged)" by <a href="https://sketchfab.com/XHeheX" target="_blank" rel="noopener">XHeheX</a><br>
+       "(FREE) Honda CRF 450" by <a href="https://skfb.ly/oFqPG" target="_blank" rel="noopener">Jacobdesigns</a></p>
        <p><b>Built with</b><br>three.js · Rapier physics · Vite · TypeScript</p>
        <p><b>Sound</b><br>Engine, wind, tyres and crashes are synthesised live in the browser.</p>`));
     this.button('Back', () => this.back(), 'menu-btn small');

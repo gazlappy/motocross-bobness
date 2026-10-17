@@ -7,6 +7,7 @@ import { BikeModel } from './bikeModel.ts';
 import { RiderModel } from './riderModel.ts';
 import { type BikeColour, GltfBikeModel } from './gltfBikeModel.ts';
 import { GltfRiderModel } from './gltfRiderModel.ts';
+import { HondaBikeModel } from './hondaBikeModel.ts';
 import { Sim } from './sim.ts';
 import { Race } from './race.ts';
 import { BajaRace } from './bajaRace.ts';
@@ -58,7 +59,7 @@ export interface RemoteEntry {
   rider: RemoteRider;
   roster: RosterEntry;
   racer: Racer | null;
-  bikeModel: BikeModel | GltfBikeModel;
+  bikeModel: AnyBikeModel;
   riderModel: RiderModel | GltfRiderModel;
 }
 
@@ -66,15 +67,20 @@ export interface SessionDeps {
   world: RAPIER.World;
   scene: THREE.Scene;
   bikeGltf: GLTF | null;
+  hondaGltf: GLTF | null;
   riderGltf: GLTF | null;
   sound: SoundSystem;
+  /** Which bike model to draw (read when a game starts). */
+  bikeStyle: () => 'crf450' | 'classic';
 }
+
+type AnyBikeModel = BikeModel | GltfBikeModel | HondaBikeModel;
 
 export interface Entry {
   name: string;
   player: Player;
   racer: Racer | null;
-  bikeModel: BikeModel | GltfBikeModel;
+  bikeModel: AnyBikeModel;
   riderModel: RiderModel | GltfRiderModel;
   ai: Driver | null;
   /** Multiplayer: this rider's roster id. */
@@ -209,11 +215,12 @@ export class Session {
 
   /** The bike and rider models for a colour (falling back to the placeholders). */
   private models(colour: BikeColour, kit: number | null) {
-    let bikeModel: BikeModel | GltfBikeModel = new BikeModel();
+    let bikeModel: AnyBikeModel = new BikeModel();
     let riderModel: RiderModel | GltfRiderModel = new RiderModel();
-    const { bikeGltf, riderGltf } = this.deps;
+    const { bikeGltf, hondaGltf, riderGltf } = this.deps;
     try {
-      if (bikeGltf) bikeModel = new GltfBikeModel(bikeGltf, colour);
+      if (hondaGltf && this.deps.bikeStyle() === 'crf450') bikeModel = new HondaBikeModel(hondaGltf, colour);
+      else if (bikeGltf) bikeModel = new GltfBikeModel(bikeGltf, colour);
     } catch (e) {
       console.warn('bike model unusable, using placeholder', e);
     }
@@ -240,7 +247,7 @@ export class Session {
     this.sim.players.push(player);
 
     const { bikeModel, riderModel } = this.models(colour, kit);
-    if (bikeModel instanceof GltfBikeModel) player.mounts = () => bikeModel.mounts();
+    if (!(bikeModel instanceof BikeModel)) player.mounts = () => bikeModel.mounts();
     if (riderModel instanceof GltfRiderModel) player.proportions = riderModel.proportions;
 
     if (this.event) this.event.add(name, player, skill === null);

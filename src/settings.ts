@@ -32,6 +32,8 @@ export interface Settings {
   playerName: string;
   /** Easy: the rider shifts their own weight. Advanced: you do, as in the original. */
   controlScheme: 'easy' | 'advanced';
+  /** The detailed Honda CRF 450, or the original low-detail bike. */
+  bikeModel: 'crf450' | 'classic';
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -52,6 +54,7 @@ export const DEFAULT_SETTINGS: Settings = {
   bike: '250',
   playerName: 'Rider',
   controlScheme: 'advanced',
+  bikeModel: 'crf450',
 };
 
 const KEY = 'motocross-bobness:settings';

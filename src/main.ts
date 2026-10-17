@@ -23,6 +23,7 @@ import { Lobby } from './net/lobby.ts';
 import type { NetSetup, RosterEntry } from './net/protocol.ts';
 import type { Racer } from './competition.ts';
 import bikeUrl from '../assets/models/Bike/mid_poly_dirt_bike.glb?url';
+import hondaUrl from '../assets/models/Bike/free_honda_crf_450_1k.glb?url';
 import riderUrl from '../assets/models/Rider/low-poly_motocross_character_rigged.glb?url';
 
 const PHYSICS_DT = 1 / 120;
@@ -60,15 +61,15 @@ const interp = new PoseInterpolator(world);
 
 // The downloaded models, falling back to the box placeholders if either fails to load.
 const loader = new GLTFLoader();
-const [bikeGltf, riderGltf] = await Promise.all(
-  [bikeUrl, riderUrl].map((url) => loader.loadAsync(url).catch((e) => (console.warn(`model ${url} failed`, e), null))),
+const [bikeGltf, riderGltf, hondaGltf] = await Promise.all(
+  [bikeUrl, riderUrl, hondaUrl].map((url) => loader.loadAsync(url).catch((e) => (console.warn(`model ${url} failed`, e), null))),
 );
 
 const bindings = loadBindings();
 const input = new Input(bindings);
 const sound = new SoundSystem();
 const settings = loadSettings();
-const deps = { world, scene, bikeGltf, riderGltf, sound };
+const deps = { world, scene, bikeGltf, hondaGltf, riderGltf, sound, bikeStyle: () => settings.bikeModel };
 
 const hud = {
   speed: document.getElementById('speed-val')!,

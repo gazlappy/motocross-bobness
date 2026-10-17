@@ -10,7 +10,8 @@
   licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
 - **"(FREE) Honda CRF 450"** by Jacobdesigns — <https://skfb.ly/oFqPG> —
   licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
-  In `assets/models/Bike/free_honda_crf_450*.glb`; not used in the game yet.
+  The game's default bike (`assets/models/Bike/free_honda_crf_450_1k.glb`, the smaller-texture download),
+  recoloured per rider.
 
 ## Libraries
 

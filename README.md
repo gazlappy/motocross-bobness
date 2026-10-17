@@ -67,4 +67,4 @@ Crashes: land on your head, nose-dive, loop out, land flat from very high or get
 
 Stack: TypeScript, Vite, Three.js, Rapier (WASM physics).
 
-Models: the bike and rider are free CC-BY models from Sketchfab (see [CREDITS.md](CREDITS.md)), in `assets/models/`. The bike file has 7 colours (red, orange, yellow, green, blue, white, black); pick yours in the game setup menu. `node scripts/inspect-glb.ts <file.glb>` prints a model's parts and skeleton.
+Models: free CC-BY models from Sketchfab (see [CREDITS.md](CREDITS.md)), in `assets/models/`. The bike is the rigged Honda CRF 450 (steering, fork, swingarm and wheels driven by the physics; its red plastics are hue-shifted for the other six colours); **Options > Bike model** switches back to the original low-detail bike, which has 7 colour variants built in. `node scripts/inspect-glb.ts <file.glb>` prints a model's parts and skeleton.
