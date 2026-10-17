@@ -6,7 +6,7 @@ export type KeyAction =
   | 'throttle' | 'brake' | 'steerLeft' | 'steerRight'
   | 'leanForward' | 'leanBack' | 'leanLeft' | 'leanRight'
   | 'stunt1' | 'stunt2'
-  | 'shiftUp' | 'shiftDown' | 'toggleAuto' | 'reset' | 'camera' | 'help' | 'mute';
+  | 'shiftUp' | 'shiftDown' | 'toggleAuto' | 'reset' | 'camera' | 'help' | 'mute' | 'toggleRetro';
 
 export const KEY_ACTIONS: { id: KeyAction; label: string }[] = [
   { id: 'throttle', label: 'Throttle' },
@@ -26,6 +26,7 @@ export const KEY_ACTIONS: { id: KeyAction; label: string }[] = [
   { id: 'camera', label: 'Change camera' },
   { id: 'help', label: 'Show / hide help' },
   { id: 'mute', label: 'Mute' },
+  { id: 'toggleRetro', label: 'Retro / realistic ground' },
 ];
 
 /** A gamepad input: a button, or one direction (or both) of an axis. */
@@ -34,7 +35,7 @@ export type PadInput =
   | { kind: 'axis'; index: number; invert: boolean };
 
 export type PadAnalog = 'throttle' | 'brake' | 'steer' | 'leanFB' | 'leanLR';
-export type PadButton = 'stunt1' | 'stunt2' | 'reset' | 'camera' | 'shiftUp' | 'shiftDown' | 'toggleAuto' | 'pause';
+export type PadButton = 'stunt1' | 'stunt2' | 'reset' | 'camera' | 'shiftUp' | 'shiftDown' | 'toggleAuto' | 'pause' | 'toggleRetro';
 
 export const PAD_ANALOG: { id: PadAnalog; label: string; twoWay: boolean }[] = [
   { id: 'throttle', label: 'Throttle', twoWay: false },
@@ -53,6 +54,7 @@ export const PAD_BUTTONS: { id: PadButton; label: string }[] = [
   { id: 'shiftDown', label: 'Shift down' },
   { id: 'toggleAuto', label: 'Auto / manual gears' },
   { id: 'pause', label: 'Pause / menu' },
+  { id: 'toggleRetro', label: 'Retro / realistic ground' },
 ];
 
 export interface Bindings {
@@ -71,6 +73,7 @@ export function defaultBindings(): Bindings {
       leanForward: ['ArrowUp'], leanBack: ['ArrowDown'], leanLeft: ['ArrowLeft'], leanRight: ['ArrowRight'],
       stunt1: ['Space'], stunt2: ['ShiftLeft', 'ShiftRight'],
       shiftUp: ['KeyE'], shiftDown: ['KeyQ'], toggleAuto: ['KeyM'], reset: ['KeyR'], camera: ['KeyC'], help: ['KeyH'], mute: ['KeyN'],
+      toggleRetro: ['KeyG'],
     },
     pad: {
       analog: {
@@ -80,7 +83,7 @@ export function defaultBindings(): Bindings {
         leanFB: { kind: 'axis', index: 3, invert: true },
         leanLR: { kind: 'axis', index: 2, invert: false },
       },
-      buttons: { stunt1: 0, stunt2: 2, reset: 3, camera: 1, shiftUp: 5, shiftDown: 4, toggleAuto: null, pause: 9 },
+      buttons: { stunt1: 0, stunt2: 2, reset: 3, camera: 1, shiftUp: 5, shiftDown: 4, toggleAuto: null, pause: 9, toggleRetro: null },
     },
   };
 }

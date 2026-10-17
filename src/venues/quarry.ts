@@ -96,5 +96,6 @@ export function buildQuarry(world: RAPIER.World): Venue {
     colliders: venueColliders(world, hm),
     atmosphere: HAZE,
     cannon: true,
+    dirt: { dust: 0xcabfaa, clod: 0x8a8070, dustAmount: 1.3, clodAmount: 0.7 },
   };
 }

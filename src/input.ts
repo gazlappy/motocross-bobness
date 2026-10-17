@@ -22,8 +22,8 @@ function toDir(forward: number, side: number): StuntDir {
   return side > 0 ? 'right' : 'left';
 }
 
-export type Action = 'reset' | 'camera' | 'shiftUp' | 'shiftDown' | 'toggleAuto' | 'help' | 'mute' | 'pause';
-const ONE_SHOT: Action[] = ['reset', 'camera', 'shiftUp', 'shiftDown', 'toggleAuto', 'help', 'mute'];
+export type Action = 'reset' | 'camera' | 'shiftUp' | 'shiftDown' | 'toggleAuto' | 'help' | 'mute' | 'pause' | 'toggleRetro';
+const ONE_SHOT: Action[] = ['reset', 'camera', 'shiftUp', 'shiftDown', 'toggleAuto', 'help', 'mute', 'toggleRetro'];
 
 const deadzone = (v: number, dz = 0.15) => (Math.abs(v) < dz ? 0 : (v - Math.sign(v) * dz) / (1 - dz));
 

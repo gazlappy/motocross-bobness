@@ -71,7 +71,7 @@ export class RemoteRider {
   lastHeard = 0;
 
   /** Looks enough like a Player for events (position, stunt score) and models (BikeView). */
-  readonly bike: BikeView & { speed: number; body: BikeView['body'] & { linvel(): { x: number; y: number; z: number } } };
+  readonly bike: BikeView & { speed: number; throttle: number; body: BikeView['body'] & { linvel(): { x: number; y: number; z: number } } };
   readonly stunts = { total: 0 };
 
   constructor(world: RAPIER.World, id: string, spec: BikeSpec, spawn: THREE.Vector3, yaw: number) {
@@ -94,6 +94,7 @@ export class RemoteRider {
       wheels: this.wheels,
       steerAngle: 0,
       speed: 0,
+      throttle: 0,
     };
   }
 
@@ -144,6 +145,7 @@ export class RemoteRider {
     this.bike.steerAngle = lerp(STEER);
     this.rpm = lerp(RPM);
     this.throttle = lerp(THROTTLE);
+    this.bike.throttle = this.throttle;
     const [f, r] = this.wheels;
     f.rayLength = lerp(WHEELS);
     f.spin = lerpAngle(a[WHEELS + 1], b[WHEELS + 1], k);

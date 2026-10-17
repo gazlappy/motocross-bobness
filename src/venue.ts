@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import RAPIER from '@dimforge/rapier3d-compat';
 import { type Heightmap, sampleHeight } from './heightmap.ts';
 import { createTerrainCollider } from './terrain.ts';
+import type { DirtLook } from './particles.ts';
 
 // A place to ride: its ground, scenery, colliders, lighting and how you start and stay in bounds.
 // Each event type has one (Nationals, Supercross, Baja, Stunt Quarry); the game switches between
@@ -36,6 +37,8 @@ export interface Venue {
   waypoints?: THREE.Vector3[];
   /** Baja: waypoint markers, coloured by the HUD to show which is next. */
   markers?: THREE.Object3D[];
+  /** What the bikes throw up: dust and clod colours. */
+  dirt?: DirtLook;
 }
 
 /** The physical side of a venue (no scenery), so it can also be built for headless tests. */

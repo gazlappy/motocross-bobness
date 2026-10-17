@@ -8,7 +8,7 @@ import { CameraRig } from './camera.ts';
 import { SoundSystem } from './audio/sound.ts';
 import { Session, type SessionConfig } from './session.ts';
 import { Menu } from './menu.ts';
-import { type Settings, loadSettings } from './settings.ts';
+import { type Settings, loadSettings, saveSettings } from './settings.ts';
 import { clockText, ordinal } from './format.ts';
 import type { ResultsTable } from './competition.ts';
 import { BajaRace } from './bajaRace.ts';
@@ -18,6 +18,7 @@ import type { Venue, VenueId } from './venue.ts';
 import { buildVenue } from './venues/index.ts';
 import { PoseInterpolator } from './interpolation.ts';
 import { setTerrainStyle } from './terrain.ts';
+import { DirtParticles } from './particles.ts';
 import { type EventPayout, SEASON, TIERS, eventConfig, loadCareer, money, recordEvent } from './career.ts';
 import { TagGame } from './tag.ts';
 import { Lobby } from './net/lobby.ts';
@@ -59,6 +60,8 @@ scene.add(sun, sun.target);
 const world = new RAPIER.World({ x: 0, y: -9.81, z: 0 });
 world.timestep = PHYSICS_DT;
 const interp = new PoseInterpolator(world);
+const dirt = new DirtParticles();
+scene.add(dirt.group);
 
 // The downloaded models, falling back to the box placeholders if either fails to load.
 const loader = new GLTFLoader();
@@ -109,6 +112,7 @@ async function getVenue(id: VenueId) {
 /** Show one venue: its scenery and colliders on, every other venue's off, its sky and lighting. */
 function useVenue(v: Venue) {
   venue = v;
+  dirt.setVenue(v.hm, v.dirt);
   setTerrainStyle(v.root, settings.retro ? 'retro' : 'real');
   for (const other of venues.values()) {
     const on = other === v;
@@ -216,6 +220,7 @@ async function begin(config: SessionConfig) {
   useVenue(await getVenue(config.venue));
   interp.clear();
   session = new Session(deps, venue, config);
+  dirt.clear();
   lastCount = -1;
   hud.banner.classList.remove('show');
   showTrick('', false);
@@ -388,7 +393,7 @@ function helpHtml() {
     : `${k('leanForward')}/${k('leanBack')} lean fwd/back &nbsp; ${k('leanLeft')}/${k('leanRight')} lean sideways`;
   return `${k('throttle')} throttle &nbsp; ${k('brake')} brake &nbsp; ${k('steerLeft')}/${k('steerRight')} steer &nbsp; ${lean} &nbsp; ` +
     `${k('stunt1')}/${k('stunt2')} + lean keys: stunts (in the air) &nbsp; ${k('shiftDown')}/${k('shiftUp')} shift &nbsp; ${k('toggleAuto')} auto/manual &nbsp; ` +
-    `${k('camera')} camera &nbsp; ${k('reset')} reset / skip wipeout &nbsp; ${k('mute')} mute &nbsp; ${k('help')} hide help` +
+    `${k('camera')} camera &nbsp; ${k('reset')} reset / skip wipeout &nbsp; ${k('mute')} mute &nbsp; ${k('toggleRetro')} retro look &nbsp; ${k('help')} hide help` +
     `<br />Gamepad: ${padInputName(pad.analog.throttle)} gas, ${padInputName(pad.analog.brake)} brake, ${padInputName(pad.analog.steer)} steer, ` +
     `${padInputName(pad.analog.leanFB)} / ${padInputName(pad.analog.leanLR)} lean, ${padButtonName(pad.buttons.stunt1)}/${padButtonName(pad.buttons.stunt2)} + lean: stunts, ` +
     `${padButtonName(pad.buttons.reset)} reset, ${padButtonName(pad.buttons.camera)} camera &nbsp; Rebind in Options &gt; Controls`;
@@ -548,6 +553,13 @@ function frame(now: number) {
       settings.muted = !settings.muted;
       applySettings(settings);
     }
+    if (a === 'toggleRetro') {
+      settings.retro = !settings.retro;
+      saveSettings(settings);
+      applySettings(settings);
+      menu.refresh();
+      flashBanner(settings.retro ? 'RETRO<small>original look</small>' : 'REALISTIC<small>ground</small>', 1100);
+    }
     if (!playing || !me) continue;
     const bike = me.player.bike;
     if (a === 'reset') me.player.reset();
@@ -576,6 +588,7 @@ function frame(now: number) {
     }
     if (steps === MAX_STEPS_PER_FRAME) accumulator = 0;
     session.tick(dt);
+    dirt.update(dt, [...session.entries.map((e) => e.player.bike), ...session.remotes.map((r) => r.rider.bike)]);
     // Draw part way between the last two physics steps so motion is smooth at any refresh rate.
     interp.apply(accumulator / PHYSICS_DT);
     session.render();
@@ -605,6 +618,7 @@ function frame(now: number) {
   hud.rpm.style.width = `${Math.max(0, Math.min(1, bike.rpmFraction)) * 100}%`;
 
   interp.restore();
+  dirt.setView(camera, renderer.domElement.height);
   renderer.render(scene, camera);
 }
 requestAnimationFrame(frame);

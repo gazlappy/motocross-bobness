@@ -33,5 +33,6 @@ export function buildNationals(world: RAPIER.World): Venue {
     colliders: venueColliders(world, hm),
     atmosphere: SUNNY,
     cannon: true,
+    dirt: { dust: 0x9c7c5a, clod: 0x6a4a30, dustAmount: 1, clodAmount: 1 },
   };
 }

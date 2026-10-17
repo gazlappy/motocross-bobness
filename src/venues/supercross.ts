@@ -184,5 +184,6 @@ export function buildSupercross(world: RAPIER.World): Venue {
     colliders: venueColliders(world, hm, ground.extra),
     atmosphere: NIGHT,
     cannon: false,
+    dirt: { dust: 0x7a5c46, clod: 0x5a3c26, dustAmount: 0.5, clodAmount: 1.3 },
   };
 }

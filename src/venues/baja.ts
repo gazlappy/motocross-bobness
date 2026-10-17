@@ -117,6 +117,7 @@ export function buildBaja(world: RAPIER.World): Venue {
     colliders: venueColliders(world, hm),
     atmosphere: DESERT_FAR,
     cannon: true,
+    dirt: { dust: 0xd8bc8e, clod: 0xa8834f, dustAmount: 1.6, clodAmount: 0.6 },
     markers,
   };
 }

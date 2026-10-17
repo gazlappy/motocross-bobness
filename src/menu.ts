@@ -142,6 +142,11 @@ export class Menu {
     this.open(this.lobby.room ? 'lobby' : 'multiplayer');
   }
 
+  /** Settings changed outside the menu (a hotkey): redraw if a screen showing them is open. */
+  refresh() {
+    if (this.screen === 'options' || this.screen === 'controls') this.render();
+  }
+
   /** Something changed in the room: redraw if it's on screen. */
   lobbyChanged() {
     if (this.screen === 'lobby' || this.screen === 'multiplayer') this.render();
