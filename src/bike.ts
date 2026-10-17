@@ -1,10 +1,14 @@
 import * as THREE from 'three';
 import RAPIER from '@dimforge/rapier3d-compat';
 import type { Controls } from './input.ts';
+import { GROUP_BIKE, GROUP_PROBE, GROUP_WORLD, Rider, groups } from './rider.ts';
 
-// Bike-local axes: forward = -Z, right = +X, up = +Y. Origin = centre of mass (bike + rider).
+// Bike-local axes: forward = -Z, right = +X, up = +Y.
 
-const MASS = 180;
+const BIKE_MASS = 105;
+const BIKE_COM = { x: 0, y: -0.12, z: 0 };
+const BIKE_INERTIA = { x: 20, y: 16, z: 8 };
+/** Bike + rider inertia, used to scale the balance and air-control torques. */
 const INERTIA = new THREE.Vector3(45, 35, 28); // pitch (X), yaw (Y), roll (Z)
 const GRAVITY = 9.81;
 
@@ -19,6 +23,7 @@ const TYRE_MU = 1.15;
 const PROBE_RADIUS = 0.06;
 const WHEELBASE = 1.48;
 const IDENTITY = { x: 0, y: 0, z: 0, w: 1 };
+const PROBE_GROUPS = groups(GROUP_PROBE, GROUP_WORLD);
 
 const GEARS = [2.9, 2.1, 1.62, 1.3, 1.08];
 const FINAL_DRIVE = 10;
@@ -26,7 +31,7 @@ const IDLE_RPM = 1600;
 const REDLINE = 11500;
 const SHIFT_UP_RPM = 10400;
 const SHIFT_DOWN_RPM = 5200;
-const PEAK_TORQUE = 44; // Nm at the crank, 250 two-stroke-ish
+const PEAK_TORQUE = 38; // Nm at the crank: ~40 hp, a 250 two-stroke
 const TORQUE_CURVE: [number, number][] = [
   [0, 0.4], [1600, 0.45], [4000, 0.68], [7000, 0.95], [8500, 1], [10500, 0.86], [11500, 0.6], [12500, 0],
 ];
@@ -34,6 +39,10 @@ const TORQUE_CURVE: [number, number][] = [
 const FRONT_BRAKE = 1700;
 const REAR_BRAKE = 850;
 const DRAG_CDA = 0.55;
+const LEAN_KP = 140;
+const LEAN_KD = 35;
+const LEAN_RATE = 2.5; // rad/s
+const MAX_LEAN = Math.atan(0.95 * TYRE_MU); // steepest lean the tyres can hold
 
 function torqueAt(rpm: number) {
   for (let i = 1; i < TORQUE_CURVE.length; i++) {
@@ -66,14 +75,29 @@ const _right = new THREE.Vector3();
 const _lat = new THREE.Vector3();
 const _wf = new THREE.Vector3();
 const _com = new THREE.Vector3();
+const _origin = new THREE.Vector3();
 const _linv = new THREE.Vector3();
 const _angv = new THREE.Vector3();
 const _imp = new THREE.Vector3();
 
+const _rn = new THREE.Vector3();
+const _qInv = new THREE.Quaternion();
+
 const toR = (v: THREE.Vector3) => ({ x: v.x, y: v.y, z: v.z });
+
+/**
+ * Mass the bike body presents to an impulse along `dir` at `point`, counting the rotation it
+ * causes. Impulses sized from this can't overshoot, however small the bike's inertia is.
+ */
+function effectiveMass(point: THREE.Vector3, dir: THREE.Vector3) {
+  _rn.subVectors(point, _com).cross(dir).applyQuaternion(_qInv);
+  const invI = (_rn.x * _rn.x) / BIKE_INERTIA.x + (_rn.y * _rn.y) / BIKE_INERTIA.y + (_rn.z * _rn.z) / BIKE_INERTIA.z;
+  return 1 / (1 / BIKE_MASS + invI);
+}
 
 export class Bike {
   readonly body: RAPIER.RigidBody;
+  readonly rider: Rider;
   readonly wheels: WheelState[];
   rpm = IDLE_RPM;
   gear = 0;
@@ -84,6 +108,8 @@ export class Bike {
   airTime = 0;
   lean = new THREE.Vector2(); // rider weight shift: x = side, y = forward
   private shiftCooldown = 0;
+  private leanTarget = 0;
+  private requestedSteer = 0;
   private upsideDownTime = 0;
   private probe = new RAPIER.Ball(PROBE_RADIUS);
   private world: RAPIER.World;
@@ -94,22 +120,23 @@ export class Bike {
     const desc = RAPIER.RigidBodyDesc.dynamic()
       .setTranslation(position.x, position.y, position.z)
       .setRotation({ x: rot.x, y: rot.y, z: rot.z, w: rot.w })
-      .setAdditionalMassProperties(MASS, { x: 0, y: 0, z: 0 }, toR(INERTIA), { x: 0, y: 0, z: 0, w: 1 })
+      .setAdditionalMassProperties(BIKE_MASS, BIKE_COM, BIKE_INERTIA, { x: 0, y: 0, z: 0, w: 1 })
       .setLinearDamping(0.02)
       .setAngularDamping(0.25)
       .setCcdEnabled(true)
       .setCanSleep(false);
     this.body = world.createRigidBody(desc);
 
-    // Bike frame and rider's head: these only touch the ground when something has gone wrong.
+    // The frame only touches the ground when something has gone wrong.
     world.createCollider(
-      RAPIER.ColliderDesc.cuboid(0.16, 0.24, 0.6).setTranslation(0, 0.18, 0).setDensity(0).setFriction(0.6),
+      RAPIER.ColliderDesc.cuboid(0.16, 0.24, 0.6)
+        .setTranslation(0, 0.18, 0)
+        .setDensity(0)
+        .setFriction(0.6)
+        .setCollisionGroups(groups(GROUP_BIKE, GROUP_WORLD)),
       this.body,
     );
-    world.createCollider(
-      RAPIER.ColliderDesc.ball(0.2).setTranslation(0, 1.1, -0.05).setDensity(0).setFriction(0.6),
-      this.body,
-    );
+    this.rider = new Rider(world, this.body);
 
     const wheel = (z: number, steered: boolean): WheelState => ({
       attach: new THREE.Vector3(0, 0.12, z),
@@ -143,6 +170,8 @@ export class Bike {
     this.body.setRotation({ x: rot.x, y: rot.y, z: rot.z, w: rot.w }, true);
     this.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
     this.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
+    this.lean.set(0, 0);
+    this.rider.snapTo(this.body);
     this.gear = 0;
     this.rpm = IDLE_RPM;
     this.upsideDownTime = 0;
@@ -163,8 +192,11 @@ export class Bike {
     const body = this.body;
     const r = body.rotation();
     _q.set(r.x, r.y, r.z, r.w);
+    _qInv.copy(_q).invert();
     const t = body.translation();
-    _com.set(t.x, t.y, t.z);
+    _origin.set(t.x, t.y, t.z);
+    const cm = body.worldCom();
+    _com.set(cm.x, cm.y, cm.z);
     _fwd.set(0, 0, -1).applyQuaternion(_q);
     _up.set(0, 1, 0).applyQuaternion(_q);
     _right.set(1, 0, 0).applyQuaternion(_q);
@@ -176,24 +208,33 @@ export class Bike {
     const absSpeed = Math.abs(this.speed);
 
     // Steering lock narrows with speed so the turn never asks for more grip than the tyres have.
-    const gripLimited = Math.atan((0.95 * TYRE_MU * GRAVITY * WHEELBASE) / Math.max(1, absSpeed * absSpeed));
-    const maxSteer = Math.min(0.62, gripLimited * 1.15);
-    this.steerAngle = c.steer * maxSteer;
+    const gripLimited = Math.atan((0.85 * TYRE_MU * GRAVITY * WHEELBASE) / Math.max(1, absSpeed * absSpeed));
+    const maxSteer = Math.min(0.62, gripLimited);
+    this.requestedSteer = c.steer * maxSteer;
+    // Above walking pace a bike turns because it leans: steer the front wheel to the angle the current
+    // lean can hold, and let the steering input set the lean (see applyBalance). At a crawl, steer directly.
+    const curRoll = -Math.asin(THREE.MathUtils.clamp(_right.y, -1, 1));
+    const leanSteer = Math.atan((GRAVITY * WHEELBASE * Math.tan(curRoll)) / Math.max(1, absSpeed * absSpeed));
+    const byLean = THREE.MathUtils.smoothstep(absSpeed, 3, 8);
+    this.steerAngle = THREE.MathUtils.clamp(
+      THREE.MathUtils.lerp(this.requestedSteer, leanSteer * Math.sign(this.speed || 1), byLean),
+      -maxSteer, maxSteer,
+    );
     this.lean.x += (c.leanSide - this.lean.x) * Math.min(1, dt * 8);
     this.lean.y += (c.leanForward - this.lean.y) * Math.min(1, dt * 8);
+    this.rider.couple(body, this.lean, dt);
 
     this.updateEngine(c, dt);
 
-    const wheelMass = MASS * 0.5;
     let groundedCount = 0;
 
     for (const w of this.wheels) {
-      const origin = _p.copy(w.attach).applyQuaternion(_q).add(_com);
+      const origin = _p.copy(w.attach).applyQuaternion(_q).add(_origin);
       const maxLen = SUSP_TRAVEL + WHEEL_RADIUS;
       // A thin sphere sweep rather than a ray: rays running exactly along heightfield edges can miss.
       const hit = this.world.castShape(
         toR(origin), IDENTITY, { x: -_up.x, y: -_up.y, z: -_up.z }, this.probe,
-        0, maxLen - PROBE_RADIUS, true, undefined, undefined, undefined, body,
+        0, maxLen - PROBE_RADIUS, true, undefined, PROBE_GROUPS, undefined, body,
       );
 
       if (!hit) {
@@ -211,21 +252,26 @@ export class Bike {
       w.rayLength = dist;
       w.surfaceNormal.set(hit.normal1.x, hit.normal1.y, hit.normal1.z);
       const compression = maxLen - dist;
-      // Compression rate from the chassis velocity at the attach point (the ground doesn't move).
+      // Compression rate: how fast the attach point closes on the ground surface. Measuring along the
+      // bike's own axis instead would read forward speed as extension whenever the bike is pitched.
       _v.subVectors(origin, _com);
       _v.crossVectors(_angv, _v).add(_linv);
-      const compVel = -_v.dot(_up);
+      const compVel = -_v.dot(w.surfaceNormal) / Math.max(0.3, _up.dot(w.surfaceNormal));
       w.compression = compression;
 
       let springF = SUSP_K * compression;
       if (compression > SUSP_BUMP_START) springF += SUSP_BUMP_K * (compression - SUSP_BUMP_START);
-      let dampF = compVel * (compVel > 0 ? SUSP_DAMP_COMP : SUSP_DAMP_REBOUND);
+      let damp = compVel > 0 ? SUSP_DAMP_COMP : SUSP_DAMP_REBOUND;
       // Hydraulic bottoming: soak up energy near full travel instead of springing it back.
-      if (compression > SUSP_BUMP_START) dampF *= 3;
+      if (compression > SUSP_BUMP_START) damp *= 3;
+      // Never damp harder than one physics step can resolve, or the damper itself oscillates.
+      damp = Math.min(damp, (0.8 * effectiveMass(origin, _up)) / dt);
+      const dampF = compVel * damp;
       const load = Math.max(0, springF + dampF);
 
       const contact = origin.addScaledVector(_up, -dist);
-      body.applyImpulseAtPoint(toR(_imp.copy(_up).multiplyScalar(load * dt)), toR(contact), true);
+      // The ground pushes along its normal; pushing along the bike's tilted axis would act as thrust.
+      body.applyImpulseAtPoint(toR(_imp.copy(w.surfaceNormal).multiplyScalar(load * dt)), toR(contact), true);
 
       // Tyre frame on the ground plane.
       const n = w.surfaceNormal;
@@ -240,18 +286,21 @@ export class Bike {
       const vLong = _v.dot(_wf);
       const vLat = _v.dot(_lat);
 
-      let jLat = -vLat * wheelMass * 0.45;
+      const mLat = effectiveMass(contact, _lat);
+      const mLong = effectiveMass(contact, _wf);
+      let jLat = -vLat * mLat * 0.45; // both tyres act at once, so each takes under half
       let jLong = 0;
+      const stopJ = Math.abs(vLong) * mLong * 0.5; // impulse that would halve the rolling speed
 
       if (w.steered) {
-        jLong -= Math.sign(vLong) * Math.min(Math.abs(vLong) * wheelMass * 0.5, FRONT_BRAKE * c.brake * dt);
+        jLong -= Math.sign(vLong) * Math.min(stopJ, FRONT_BRAKE * c.brake * dt);
       } else {
         jLong += this.driveForce(c, vLong) * dt;
-        jLong -= Math.sign(vLong) * Math.min(Math.abs(vLong) * wheelMass * 0.5, REAR_BRAKE * c.brake * dt);
+        jLong -= Math.sign(vLong) * Math.min(stopJ, REAR_BRAKE * c.brake * dt);
         // Walk the bike backwards when stopped and holding brake.
         if (c.brake > 0.5 && c.throttle === 0 && vLong < 0.5) jLong -= 450 * dt;
       }
-      jLong -= Math.sign(vLong) * Math.min(Math.abs(vLong) * wheelMass * 0.5, 0.02 * load * dt);
+      jLong -= Math.sign(vLong) * Math.min(stopJ, 0.02 * load * dt);
 
       const maxJ = TYRE_MU * load * dt;
       const mag = Math.hypot(jLong, jLat);
@@ -281,9 +330,19 @@ export class Bike {
     this.upsideDownTime = _up.y < 0.1 && absSpeed < 2 ? this.upsideDownTime + dt : 0;
   }
 
+  /** How far the nose is lifted off the ground (radians), 0 unless the rear wheel is down. */
+  get wheelieAngle() {
+    const rear = this.wheels[1];
+    if (!rear.grounded || this.wheels[0].grounded) return 0;
+    return Math.asin(THREE.MathUtils.clamp(_fwd.dot(rear.surfaceNormal), -1, 1));
+  }
+
   private driveForce(c: Controls, vLong: number) {
     if (this.rpm >= REDLINE) return 0;
-    const f = (torqueAt(this.rpm) * c.throttle * this.gearRatio * 0.9) / WHEEL_RADIUS;
+    // Feathering the throttle as the nose climbs, unless the rider is leaning back for a wheelie.
+    const limit = 0.18 + 0.27 * Math.max(0, -this.lean.y);
+    const feather = 1 - 0.9 * THREE.MathUtils.smoothstep(this.wheelieAngle, limit, limit + 0.2);
+    const f = (torqueAt(this.rpm) * c.throttle * feather * this.gearRatio * 0.9) / WHEEL_RADIUS;
     // Ease off near zero speed so the bike creeps rather than lurches when the clutch bites.
     return vLong < -0.5 ? f * 0.3 : f;
   }
@@ -314,8 +373,8 @@ export class Bike {
   }
 
   /**
-   * Stand-in for the rider: keeps the bike leaned to match the turn, and turns weight shift into
-   * pitch/roll. Step 2 replaces most of this with a separately simulated rider.
+   * The rider's balance and air control. Weight shift itself is physical (see Rider); these torques
+   * stand in for steering inputs and pushing on the bars, scaled for an arcade feel like the original.
    */
   private applyBalance(c: Controls, dt: number) {
     const body = this.body;
@@ -326,16 +385,23 @@ export class Bike {
     const torque = _imp.set(0, 0, 0);
 
     if (this.grounded) {
-      const yawRate = -_angv.dot(_up);
-      const turnLean = Math.atan2(this.speed * yawRate, GRAVITY);
-      const target = THREE.MathUtils.clamp(turnLean + this.lean.x * 0.25, -0.95, 0.95);
-      torque.addScaledVector(_fwd, INERTIA.z * (90 * (target - roll) - 15 * rollRate));
-      // Weight forward/back helps hold or kill a wheelie.
-      torque.addScaledVector(_right, -INERTIA.x * 5 * this.lean.y);
+      // Lean for the turn the rider is asking for (speed and steering), not the bike's actual yaw:
+      // following actual yaw feeds a rear-wheel slide back into more lean.
+      const turnLean = Math.atan2(this.speed * this.speed * Math.tan(this.requestedSteer), GRAVITY * WHEELBASE);
+      const desired = THREE.MathUtils.clamp(turnLean + this.lean.x * 0.2, -MAX_LEAN, MAX_LEAN);
+      // A rider can't throw the bike over instantly; snapping the target makes the wheels skip.
+      this.leanTarget += THREE.MathUtils.clamp(desired - this.leanTarget, -LEAN_RATE * dt, LEAN_RATE * dt);
+      const target = this.leanTarget;
+      torque.addScaledVector(_fwd, INERTIA.z * (LEAN_KP * (target - roll) - LEAN_KD * rollRate));
+      // Wheelie control: past a point the rider pulls the nose back down, unless leaning back for it.
+      const nose = this.wheelieAngle;
+      const limit = 0.12 + 0.32 * Math.max(0, -this.lean.y) - 0.06 * Math.max(0, this.lean.y);
+      if (nose > limit) torque.addScaledVector(_right, -INERTIA.x * (70 * (nose - limit) + 6 * Math.max(0, pitchRate)));
     } else {
+      this.leanTarget = roll;
       // Mid-air: weight shift pitches and rolls the bike; throttle/brake torque the rear wheel.
       const gyro = (c.throttle - c.brake) * 0.5;
-      torque.addScaledVector(_right, INERTIA.x * (-7 * this.lean.y + gyro - 1.2 * pitchRate));
+      torque.addScaledVector(_right, INERTIA.x * (-5 * this.lean.y + gyro - 1.2 * pitchRate));
       torque.addScaledVector(_fwd, INERTIA.z * (5 * this.lean.x - 3 * roll - 2 * rollRate));
       torque.addScaledVector(_up, -INERTIA.y * 2.5 * c.steer);
       // A gentle pull that lines the bike up with its flight path, like a rider instinctively would.
@@ -344,6 +410,10 @@ export class Bike {
         torque.addScaledVector(_right, INERTIA.x * 2.5 * align * (1 - Math.abs(this.lean.y)));
       }
     }
-    body.applyTorqueImpulse(toR(torque.multiplyScalar(dt)), true);
+    // Split between bike and rider: the rider moves the bike with their body, and pushing only on
+    // the light bike makes the controller overshoot from one physics step to the next.
+    torque.multiplyScalar(dt * 0.5);
+    body.applyTorqueImpulse(toR(torque), true);
+    this.rider.body.applyTorqueImpulse(toR(torque), true);
   }
 }

@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import type { Bike } from './bike.ts';
+import { RIDER_POINTS } from './rider.ts';
 
 // Placeholder bike + rider built from primitives. Swap for a glTF model once one is chosen.
 
@@ -19,6 +20,12 @@ const RAKE = 0.47;
 const SWINGARM_PIVOT = new THREE.Vector3(0, 0.12, 0.05);
 const Z_AXIS = new THREE.Vector3(0, 0, 1);
 const _dir = new THREE.Vector3();
+const _riderPos = new THREE.Vector3();
+const _riderRot = new THREE.Quaternion();
+const _KNEE_L = new THREE.Vector3(-0.3, 0, -1);
+const _KNEE_R = new THREE.Vector3(0.3, 0, -1);
+const _ELBOW_L = new THREE.Vector3(-1, 0.2, 0.4);
+const _ELBOW_R = new THREE.Vector3(1, 0.2, 0.4);
 
 function box(w: number, h: number, d: number, mat: THREE.Material, x = 0, y = 0, z = 0) {
   const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
@@ -158,34 +165,37 @@ export class BikeModel {
   }
 
   private poseRider(bike: Bike) {
-    const lean = bike.lean;
+    // Hips, shoulders and head come from the rider's physics body; hands and feet stay on the bike.
+    bike.rider.localPose(bike.body, _riderPos, _riderRot);
+    const at = (p: THREE.Vector3, x = 0) => p.clone().setX(p.x + x).applyQuaternion(_riderRot).add(_riderPos);
+    const hip = at(RIDER_POINTS.hip);
+    const shoulder = at(RIDER_POINTS.shoulder);
+    const hipL = at(RIDER_POINTS.hip, -0.11), hipR = at(RIDER_POINTS.hip, 0.11);
+    const shL = at(RIDER_POINTS.shoulder, -0.19), shR = at(RIDER_POINTS.shoulder, 0.19);
+
     const steer = bike.steerAngle;
-    // Standing attack position; weight shift slides hips and shoulders.
-    const hip = new THREE.Vector3(lean.x * 0.12, 0.88 - Math.abs(lean.y) * 0.08, 0.2 - lean.y * 0.28);
-    const shoulder = new THREE.Vector3(lean.x * 0.22, 1.33 - Math.max(0, lean.y) * 0.12, -0.12 - lean.y * 0.3);
-    const headPos = shoulder.clone().add(new THREE.Vector3(0, 0.2, -0.06));
     const barL = new THREE.Vector3(-0.36, 0.84, -0.48 + steer * 0.3);
     const barR = new THREE.Vector3(0.36, 0.84, -0.48 - steer * 0.3);
     const pegL = new THREE.Vector3(-0.2, 0.2, 0.0);
     const pegR = new THREE.Vector3(0.2, 0.2, 0.0);
 
-    const knee = (hipP: THREE.Vector3, peg: THREE.Vector3, side: number) =>
-      hipP.clone().lerp(peg, 0.5).add(new THREE.Vector3(side * 0.08, 0.04, -0.22));
-    const elbow = (sh: THREE.Vector3, hand: THREE.Vector3, side: number) =>
-      sh.clone().lerp(hand, 0.5).add(new THREE.Vector3(side * 0.16, 0.06, 0.06));
-
-    const hipL = hip.clone().add(new THREE.Vector3(-0.11, 0, 0));
-    const hipR = hip.clone().add(new THREE.Vector3(0.11, 0, 0));
-    const shL = shoulder.clone().add(new THREE.Vector3(-0.19, 0, 0));
-    const shR = shoulder.clone().add(new THREE.Vector3(0.19, 0, 0));
-
-    const kL = knee(hipL, pegL, -1), kR = knee(hipR, pegR, 1);
-    const eL = elbow(shL, barL, -1), eR = elbow(shR, barR, 1);
+    const kL = bend(hipL, pegL, 0.46, _KNEE_L), kR = bend(hipR, pegR, 0.46, _KNEE_R);
+    const eL = bend(shL, barL, 0.32, _ELBOW_L), eR = bend(shR, barR, 0.32, _ELBOW_R);
     this.limbs.thighL.set(hipL, kL); this.limbs.shinL.set(kL, pegL);
     this.limbs.thighR.set(hipR, kR); this.limbs.shinR.set(kR, pegR);
     this.limbs.upperArmL.set(shL, eL); this.limbs.foreArmL.set(eL, barL);
     this.limbs.upperArmR.set(shR, eR); this.limbs.foreArmR.set(eR, barR);
     this.torso.set(hip, shoulder);
-    this.head.position.copy(headPos);
+    this.head.position.copy(at(RIDER_POINTS.head));
+    this.head.quaternion.copy(_riderRot);
   }
+}
+
+/** Two-bone joint position: equal-length bones from `a` to `b`, bending towards `hint`. */
+function bend(a: THREE.Vector3, b: THREE.Vector3, bone: number, hint: THREE.Vector3) {
+  const mid = a.clone().add(b).multiplyScalar(0.5);
+  const ab = b.clone().sub(a);
+  const half = ab.length() / 2;
+  const out = hint.clone().addScaledVector(ab, -hint.dot(ab) / Math.max(1e-6, ab.lengthSq())).normalize();
+  return mid.addScaledVector(out, Math.sqrt(Math.max(0, bone * bone - half * half)));
 }

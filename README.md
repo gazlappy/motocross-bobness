@@ -6,7 +6,7 @@ A browser remake of Motocross Madness (1998). See [RESEARCH.md](RESEARCH.md) for
 npm install
 npm run dev        # http://localhost:5173
 npm run build      # typecheck + static build into dist/
-npm run sim        # headless physics smoke test
+npm run sim        # headless physics checks (standing still, cruising, turning, weight shift, full run)
 ```
 
 Controls: **W** throttle, **S** brake, **A/D** steer, **↑/↓** lean forward/back, **←/→** lean sideways,
