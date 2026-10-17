@@ -43,13 +43,14 @@ export class GltfBikeModel {
     scene.updateMatrixWorld(true);
     // Loaders tidy node names ("dirt_bike red" -> "dirt_bike_red"), so compare letters only.
     const key = (name: string) => name.toLowerCase().replace(/[^a-z]/g, '');
-    const variant = findNode(scene, (o) => key(o.name) === `dirtbike${colour}`);
-    if (!variant) throw new Error(`bike colour "${colour}" not found in model`);
+    const found = findNode(scene, (o) => key(o.name) === `dirtbike${colour}`);
+    if (!found) throw new Error(`bike colour "${colour}" not found in model`);
 
-    // Lift the chosen variant out with its full world transform, minus its spot in the line-up.
-    const m = variant.matrixWorld.clone();
+    // Copy the chosen variant out with its full world transform, minus its spot in the line-up.
+    // (A copy, so the same colour can be used again by the next game.)
+    const m = found.matrixWorld.clone();
     m.setPosition(0, MODEL_OFFSET_Y, 0);
-    variant.removeFromParent();
+    const variant = found.clone(true);
     m.decompose(variant.position, variant.quaternion, variant.scale);
     this.root.add(variant);
     variant.traverse((o) => {

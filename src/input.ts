@@ -18,7 +18,7 @@ function toDir(forward: number, side: number): StuntDir {
   return side > 0 ? 'right' : 'left';
 }
 
-type Action = 'reset' | 'camera' | 'shiftUp' | 'shiftDown' | 'toggleAuto' | 'help' | 'mute';
+type Action = 'reset' | 'camera' | 'shiftUp' | 'shiftDown' | 'toggleAuto' | 'help' | 'mute' | 'pause';
 
 const KEY_ACTIONS: Record<string, Action> = {
   KeyR: 'reset',
@@ -31,7 +31,8 @@ const KEY_ACTIONS: Record<string, Action> = {
 };
 
 // Standard gamepad mapping button indices.
-const PAD_ACTIONS: Record<number, Action> = { 3: 'reset', 1: 'camera', 5: 'shiftUp', 4: 'shiftDown' };
+// (Esc on the keyboard is handled by the menu itself.)
+const PAD_ACTIONS: Record<number, Action> = { 3: 'reset', 1: 'camera', 5: 'shiftUp', 4: 'shiftDown', 9: 'pause' };
 
 const deadzone = (v: number, dz = 0.15) => (Math.abs(v) < dz ? 0 : (v - Math.sign(v) * dz) / (1 - dz));
 

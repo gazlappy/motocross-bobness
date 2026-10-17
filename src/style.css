@@ -34,18 +34,6 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #9cc4e4; fon
   background: var(--hud-bg); color: var(--hud-fg); font-size: 17px; letter-spacing: 0.06em; white-space: nowrap;
 }
 #race b { color: var(--accent); font-size: 1.15em; }
-#results {
-  position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); padding: 18px 26px; border-radius: 10px;
-  background: rgba(20, 14, 10, 0.88); color: var(--hud-fg); min-width: min(420px, calc(100vw - 32px));
-  max-width: calc(100vw - 32px); box-sizing: border-box; text-align: center;
-}
-#results h2 { margin: 0 0 10px; color: var(--accent); font-style: italic; letter-spacing: 0.08em; }
-#results table { width: 100%; border-collapse: collapse; font-size: 15px; }
-#results th { font-size: 12px; opacity: 0.7; text-align: left; padding: 2px 6px; }
-#results td { padding: 4px 6px; text-align: left; border-top: 1px solid rgba(255, 255, 255, 0.08); }
-#results tr.me td { color: var(--accent); font-weight: bold; }
-#results p { margin: 12px 0 0; font-size: 14px; }
-#results b { color: var(--accent); }
 #score {
   position: fixed; right: 20px; top: 16px; padding: 6px 14px; border-radius: 6px;
   background: var(--hud-bg); color: var(--hud-fg); font-size: 15px; letter-spacing: 0.1em; font-weight: bold;
@@ -64,3 +52,91 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #9cc4e4; fon
   position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
   color: var(--hud-fg); font-size: 28px; background: #2a1d12;
 }
+
+/* ---- Menus ---------------------------------------------------------------------------------- */
+#menu {
+  position: fixed; inset: 0; z-index: 10; box-sizing: border-box; padding: 4vh max(16px, 5vw);
+  display: flex; flex-direction: column; justify-content: center; color: var(--hud-fg);
+}
+#menu[hidden] { display: none; }
+body.menu-main #menu {
+  background: linear-gradient(90deg, rgba(20, 12, 6, 0.88) 0%, rgba(20, 12, 6, 0.6) 40%, rgba(20, 12, 6, 0) 75%);
+}
+body.menu-open:not(.menu-main) #menu { background: rgba(10, 7, 4, 0.6); align-items: center; }
+body.menu-open #hud, body.menu-open #race, body.menu-open #score, body.menu-open #help,
+body.menu-open #trick, body.menu-open #banner { display: none; }
+
+.menu-logo {
+  font: 900 italic clamp(40px, 7.5vw, 96px) / 0.92 'Trebuchet MS', Verdana, sans-serif;
+  color: var(--accent); letter-spacing: 0.01em; transform: skewX(-8deg); transform-origin: left;
+  text-shadow: 4px 4px 0 #2a1d12, 0 0 34px rgba(255, 140, 0, 0.35); margin: 0 0 4vh;
+}
+.menu-logo span { display: block; color: var(--hud-fg); font-size: 0.6em; letter-spacing: 0.2em; }
+body:not(.menu-main) .menu-logo { display: none; }
+
+.menu-panel {
+  display: flex; flex-direction: column; gap: 8px; width: min(480px, 100%); max-height: 88vh;
+  overflow-y: auto; overflow-x: hidden; padding: 4px 6px 4px 2px; box-sizing: border-box;
+}
+body.menu-open:not(.menu-main) .menu-panel {
+  background: rgba(24, 16, 10, 0.9); border-radius: 10px; padding: 18px 22px; width: min(520px, 100%);
+}
+.menu-title {
+  margin: 0 0 6px; font: 900 italic 30px 'Trebuchet MS', Verdana, sans-serif; color: var(--accent);
+  letter-spacing: 0.06em; text-transform: uppercase;
+}
+.menu-btn {
+  position: relative; isolation: isolate; align-self: flex-start; cursor: pointer;
+  font: 900 italic clamp(22px, 3.2vw, 30px) 'Trebuchet MS', Verdana, sans-serif; letter-spacing: 0.06em;
+  text-transform: uppercase; color: var(--hud-fg); background: none; border: 0; padding: 6px 22px 6px 14px;
+}
+.menu-btn::before {
+  content: ''; position: absolute; inset: 0; z-index: -1; background: var(--accent);
+  transform: skewX(-14deg) scaleX(0); transform-origin: left; transition: transform 0.14s ease-out;
+}
+.menu-btn:hover::before, .menu-btn:focus::before { transform: skewX(-14deg) scaleX(1); }
+.menu-btn:hover, .menu-btn:focus { color: #2a1d12; outline: none; }
+.menu-btn.small { font-size: 20px; }
+.menu-btn.go { color: var(--accent); }
+.menu-btn.go:hover, .menu-btn.go:focus { color: #2a1d12; }
+.menu-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 6px; }
+.menu-foot { margin-top: 3vh; font-size: 13px; opacity: 0.65; line-height: 1.5; }
+
+.mode-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; }
+.mode-card {
+  text-align: left; cursor: pointer; padding: 10px 12px; border-radius: 8px; color: var(--hud-fg);
+  background: rgba(255, 255, 255, 0.06); border: 2px solid transparent; font: 13px 'Trebuchet MS', Verdana, sans-serif;
+}
+.mode-card b { display: block; font-size: 17px; font-style: italic; margin-bottom: 3px; }
+.mode-card span { opacity: 0.75; line-height: 1.35; }
+.mode-card.selected { border-color: var(--accent); background: rgba(255, 176, 32, 0.14); }
+.mode-card:focus { outline: 2px solid var(--hud-fg); outline-offset: 1px; }
+.mode-card:disabled { opacity: 0.4; cursor: default; }
+
+.setup { display: flex; flex-direction: column; gap: 8px; margin: 8px 0 2px; }
+.setting { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.setting label { font-size: 15px; letter-spacing: 0.05em; opacity: 0.85; }
+.seg { display: flex; flex-wrap: wrap; gap: 4px; }
+.seg button {
+  cursor: pointer; min-width: 38px; padding: 5px 10px; border-radius: 14px; border: 0; color: var(--hud-fg);
+  background: rgba(255, 255, 255, 0.08); font: bold 13px 'Trebuchet MS', Verdana, sans-serif; text-transform: uppercase;
+}
+.seg button.selected { background: var(--accent); color: #2a1d12; }
+.seg button:focus { outline: 2px solid var(--hud-fg); outline-offset: 1px; }
+.setting input[type='range'] { width: min(220px, 55%); accent-color: var(--accent); }
+.swatches .swatch {
+  width: 26px; height: 26px; min-width: 26px; padding: 0; border-radius: 50%; background: var(--swatch);
+  border: 2px solid rgba(255, 255, 255, 0.25);
+}
+.swatches .swatch.selected { border-color: var(--hud-fg); box-shadow: 0 0 0 2px var(--accent); background: var(--swatch); }
+
+.controls-ref { font-size: 13px; line-height: 1.7; opacity: 0.8; margin: 6px 0 4px; }
+.controls-ref b, .credits b { color: var(--accent); }
+.credits { font-size: 14px; line-height: 1.55; }
+.credits p { margin: 0 0 10px; }
+.credits a { color: var(--hud-fg); }
+
+.results-table table { width: 100%; border-collapse: collapse; font-size: 15px; margin-bottom: 8px; }
+.results-table th { font-size: 12px; opacity: 0.7; text-align: left; padding: 2px 6px; }
+.results-table td { padding: 4px 6px; text-align: left; border-top: 1px solid rgba(255, 255, 255, 0.08); }
+.results-table tr.me td { color: var(--accent); font-weight: bold; }

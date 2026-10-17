@@ -28,6 +28,8 @@ export class SoundSystem {
   private ctx?: AudioContext;
   private master?: GainNode;
   private engine?: AudioWorkletNode;
+  private engineGain?: GainNode;
+  private volume = 1;
   private noise?: AudioBuffer;
   private wind?: { gain: GainNode; filter: BiquadFilterNode };
   private tyre?: { gain: GainNode; filter: BiquadFilterNode };
@@ -61,11 +63,12 @@ export class SoundSystem {
     comp.ratio.value = 4;
     comp.connect(ctx.destination);
     this.master = ctx.createGain();
-    this.master.gain.value = this.muted ? 0 : 0.9;
+    this.master.gain.value = this.muted ? 0 : 0.9 * this.volume;
     this.master.connect(comp);
 
     this.engine = new AudioWorkletNode(ctx, 'engine', { outputChannelCount: [1] });
-    this.engine.connect(this.master);
+    this.engineGain = ctx.createGain();
+    this.engine.connect(this.engineGain).connect(this.master);
 
     this.noise = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate);
     const data = this.noise.getChannelData(0);
@@ -99,6 +102,25 @@ export class SoundSystem {
     this.remotes.push({ src });
   }
 
+  /** Silence and drop every other bike's engine (when a game ends). */
+  clearEngines() {
+    for (const r of this.remotes) {
+      r.node?.disconnect();
+      r.pan?.disconnect();
+    }
+    this.remotes = [];
+  }
+
+  get isMuted() {
+    return this.muted;
+  }
+
+  /** Overall volume, 0..1. */
+  setVolume(v: number) {
+    this.volume = v;
+    if (this.ctx && this.master && !this.muted) this.master.gain.setTargetAtTime(0.9 * v, this.ctx.currentTime, 0.05);
+  }
+
   private updateRemotes(listener: THREE.Camera) {
     const ctx = this.ctx!;
     listener.getWorldPosition(_camPos);
@@ -124,14 +146,20 @@ export class SoundSystem {
 
   toggleMute() {
     this.muted = !this.muted;
-    if (this.ctx && this.master) this.master.gain.setTargetAtTime(this.muted ? 0 : 0.9, this.ctx.currentTime, 0.05);
+    if (this.ctx && this.master) this.master.gain.setTargetAtTime(this.muted ? 0 : 0.9 * this.volume, this.ctx.currentTime, 0.05);
   }
 
-  update(bike: Bike, listener?: THREE.Camera) {
+  /** `bike` is the player's bike, or null when nobody is riding (the menu's attract mode). */
+  update(bike: Bike | null, listener?: THREE.Camera) {
     const ctx = this.ctx;
     if (!ctx || !this.engine) return;
     if (listener) this.updateRemotes(listener);
     const now = ctx.currentTime;
+    this.engineGain!.gain.setTargetAtTime(bike ? 1 : 0, now, 0.05);
+    if (!bike) {
+      for (const layer of [this.wind!, this.tyre!, this.skid!]) layer.gain.gain.setTargetAtTime(0, now, 0.05);
+      return;
+    }
     const params: EngineParams = { rpm: bike.rpm, load: bike.throttle };
     this.engine.port.postMessage(params);
 

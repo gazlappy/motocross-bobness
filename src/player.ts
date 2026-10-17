@@ -271,6 +271,14 @@ export class Player {
     return ridingPose(this.bike, this.pose, this.proportions, mounts, this.stunts.state);
   }
 
+  /** Take this player's bodies out of the physics world (when a game ends). */
+  dispose() {
+    this.ragdoll?.destroy();
+    this.ragdoll = null;
+    this.world.removeRigidBody(this.bike.rider.body);
+    this.world.removeRigidBody(this.bike.body);
+  }
+
   /** Back on the bike where the crash happened, pointing the way they were going. */
   respawn() {
     this.ragdoll?.destroy();

@@ -26,6 +26,12 @@ export class CameraRig {
     this.hm = hm;
   }
 
+  /** Switch view and start it fresh (no easing in from wherever the camera was). */
+  setMode(mode: CameraMode) {
+    this.mode = mode;
+    this.initialised = false;
+  }
+
   cycle() {
     this.mode = MODES[(MODES.indexOf(this.mode) + 1) % MODES.length];
     this.initialised = false;
