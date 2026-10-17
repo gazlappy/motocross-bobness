@@ -1,10 +1,16 @@
-import type { Player } from './player.ts';
 
 // What every kind of event (track race, Baja, Stunt Quarry) offers the HUD, results and session.
 
+/** What an event needs from a rider: where their bike is and their stunt score. Riders on this
+ * machine (Player) and riders seen over the network both fit. */
+export interface Contestant {
+  bike: { body: { translation(): { x: number; y: number; z: number } } };
+  stunts: { total: number };
+}
+
 export interface Racer {
   name: string;
-  player: Player;
+  player: Contestant;
   human: boolean;
   /** Track races: distance along the track. */
   s: number;
@@ -15,6 +21,10 @@ export interface Racer {
   finishTime: number;
   lapStart: number;
   bestLap: number;
+  /** Multiplayer: simulated on another machine, which says when they finish. */
+  remote?: boolean;
+  /** A remote racer has crossed the line here; waiting for their machine's word. */
+  pending?: boolean;
 }
 
 export interface ResultsTable {
@@ -30,16 +40,18 @@ export interface Competition {
   readonly started: boolean;
   onLap?: (racer: Racer, lap: number, lapTime: number) => void;
   onFinish?: (racer: Racer, place: number) => void;
-  add(name: string, player: Player, human: boolean): void;
+  add(name: string, player: Contestant, human: boolean): void;
   /** Per physics step, after the world has moved. */
   update(dt: number): void;
   standings(): Racer[];
   position(r: Racer): number;
+  /** Multiplayer: a remote racer's own machine says they finished, at `time` on its clock. */
+  finishRacer?(r: Racer, time: number): void;
   /** Top-bar HUD text (HTML) for a racer. */
   hud(r: Racer): string;
   results(): ResultsTable;
 }
 
-export function newRacer(name: string, player: Player, human: boolean, s = 0): Racer {
+export function newRacer(name: string, player: Contestant, human: boolean, s = 0): Racer {
   return { name, player, human, s, lap: 0, nextCheckpoint: 0, finished: false, finishTime: 0, lapStart: 0, bestLap: Infinity };
 }

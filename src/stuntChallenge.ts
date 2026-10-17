@@ -1,5 +1,4 @@
-import type { Player } from './player.ts';
-import { type Competition, type Racer, type ResultsTable, newRacer } from './competition.ts';
+import { type Competition, type Contestant, type Racer, type ResultsTable, newRacer } from './competition.ts';
 import { clockText } from './format.ts';
 import { COUNTDOWN } from './race.ts';
 
@@ -36,7 +35,7 @@ export class StuntChallenge implements Competition {
     return this.clock >= 0;
   }
 
-  add(name: string, player: Player, human: boolean) {
+  add(name: string, player: Contestant, human: boolean) {
     this.racers.push(newRacer(name, player, human));
   }
 

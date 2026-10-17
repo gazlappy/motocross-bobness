@@ -16,8 +16,12 @@ npm run bikes      # drag race and roll-on times for each bike
 npm run sim        # headless checks (physics, crashes, stunts, career rules, a full race)
 ```
 
-Controls: **W** throttle, **S** brake, **A/D** steer, **↑/↓** lean forward/back, **←/→** lean sideways,
-**Q/E** shift (switches to manual), **M** auto/manual, **C** camera (chase/far/helmet/thrill), **R** reset (or skip a wipeout), **N** mute. Gamepad supported.
+Controls (defaults): **W** throttle, **S** brake, **A/D** steer, **↑/↓** lean forward/back, **←/→** lean sideways,
+**Q/E** shift (switches to manual), **M** auto/manual, **C** camera (chase/far/helmet/thrill), **R** reset (or skip a wipeout), **N** mute.
+Gamepad: RT/LT gas and brake, left stick steer, right stick lean, A/X stunts, Y reset, B camera, Start for the menu.
+**Options > Controls**: choose **Easy** (the rider shifts their own weight: levels the bike for landings, keeps the front
+down pulling away, automatic gears; lean by hand any time to take over) or **Advanced** (the original's full manual weight
+shift), and remap every key (main and alternate) and every gamepad stick, trigger and button (with invert). Saved in the browser.
 
 The game opens on a main menu over a live attract-mode race: **Career**, **Single Event** (Nationals, Supercross,
 Baja, Stunt Quarry or Free Ride, with laps, opponents, rival difficulty, session time, venue, bike and colour), **Options** (volume, units,
@@ -45,6 +49,14 @@ Career: three series (Rookie on 125s, Pro and Champions Cup on 250s), each a six
 the same six rivals: Nationals, Supercross, Baja, a cash-only Stunt Quarry bonus, Supercross Main and the
 Nationals Final. Places score points (25-20-16-...) and prize money; the championship pays a bonus, and a top-three
 finish unlocks the next series. Spend winnings in the garage. Saved in the browser.
+
+Multiplayer (up to 8): **Multiplayer > Host a game** gives a 5-letter room code; friends pick **Join** and type it.
+The host chooses Nationals or Supercross races, Baja, **Tag** (Baja or Quarry: whoever is "it" racks up time until they
+ride into someone; least time wins) or Free Ride, and can fill race grids with AI riders. Browsers connect directly over
+WebRTC (PeerJS); the free public PeerJS server only introduces them. Each player's machine simulates their own bike and
+sends its state 20 times a second; everyone else's bikes are drawn smoothly a moment behind and are solid while moving.
+Each rider's own machine decides their finish, so everyone sees the same results. The game keeps running behind the menu.
+Some strict networks (corporate, some mobile) block direct connections; there's no relay server yet.
 
 Stunts (in the air): hold **Space** or **Shift** and pick the trick with the arrows (pad: A/X + right stick).
 Space: Superman, ↑ Cliffhanger, ↓ Heel Clicker, ←/→ Nac Nac. Shift: Double Can Can, ↑ Bar Hop, ↓ Splits,

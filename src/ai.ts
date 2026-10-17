@@ -16,8 +16,8 @@ const STUCK_TIME = 3.5;
 const _f = new THREE.Vector3();
 const _q = new THREE.Quaternion();
 
-/** In the air, line the bike up with its flight so it lands on both wheels. */
-export function airControls(bike: Player['bike'], c: Controls) {
+/** In the air: the forward/back lean that lines the bike up with its flight, to land on both wheels. */
+export function landingLean(bike: Player['bike']) {
   const vel = bike.body.linvel();
   const flight = Math.atan2(vel.y, Math.hypot(vel.x, vel.z));
   const r = bike.body.rotation();
@@ -25,7 +25,12 @@ export function airControls(bike: Player['bike'], c: Controls) {
   const pitch = Math.asin(THREE.MathUtils.clamp(_f.y, -1, 1));
   // Only correct big errors; the bike already tends to follow its flight.
   const err = pitch - flight * 0.5;
-  c.leanForward = Math.abs(err) > 0.2 ? THREE.MathUtils.clamp((err - Math.sign(err) * 0.2) * 2, -1, 1) : 0;
+  return Math.abs(err) > 0.2 ? THREE.MathUtils.clamp((err - Math.sign(err) * 0.2) * 2, -1, 1) : 0;
+}
+
+/** In the air, line the bike up with its flight so it lands on both wheels. */
+export function airControls(bike: Player['bike'], c: Controls) {
+  c.leanForward = landingLean(bike);
   c.steer = 0;
   c.throttle = 0.3;
 }

@@ -1,6 +1,5 @@
 import type * as THREE from 'three';
-import type { Player } from './player.ts';
-import { type Competition, type Racer, type ResultsTable, newRacer } from './competition.ts';
+import { type Competition, type Contestant, type Racer, type ResultsTable, newRacer } from './competition.ts';
 import { clockText, ordinal } from './format.ts';
 import { COUNTDOWN } from './race.ts';
 
@@ -27,7 +26,7 @@ export class BajaRace implements Competition {
     return this.clock >= 0;
   }
 
-  add(name: string, player: Player, human: boolean) {
+  add(name: string, player: Contestant, human: boolean) {
     this.racers.push(newRacer(name, player, human));
   }
 
@@ -46,15 +45,14 @@ export class BajaRace implements Competition {
     this.clock += dt;
     if (!this.started) return;
     for (const r of this.racers) {
-      if (r.finished) continue;
+      if (r.finished || r.pending) continue;
       if (this.distanceToTarget(r) < WAYPOINT_RADIUS) {
         const index = r.nextCheckpoint;
         r.lap = ++r.nextCheckpoint;
         this.onWaypoint?.(r, index);
         if (r.nextCheckpoint >= this.waypoints.length) {
-          r.finished = true;
-          r.finishTime = this.clock;
-          this.onFinish?.(r, ++this.finishedCount);
+          if (r.remote) r.pending = true;
+          else this.finishRacer(r, this.clock);
         }
       }
     }
@@ -63,6 +61,15 @@ export class BajaRace implements Competition {
   private progress(r: Racer) {
     if (r.finished) return 1e9 - r.finishTime;
     return r.nextCheckpoint * 1e5 - this.distanceToTarget(r);
+  }
+
+  finishRacer(r: Racer, time: number) {
+    if (r.finished) return;
+    r.finished = true;
+    r.pending = false;
+    r.nextCheckpoint = this.waypoints.length;
+    r.finishTime = time;
+    this.onFinish?.(r, ++this.finishedCount);
   }
 
   standings() {

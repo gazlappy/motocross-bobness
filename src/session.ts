@@ -19,11 +19,14 @@ import type { SoundSystem } from './audio/sound.ts';
 import type { Difficulty } from './settings.ts';
 import type { Venue, VenueId } from './venue.ts';
 import { BIKES, type BikeId, type BikeSpec } from './bikes.ts';
+import { TagGame } from './tag.ts';
+import { RemoteRider, snapshot } from './net/remoteRider.ts';
+import type { RosterEntry } from './net/protocol.ts';
 
 // One game: the riders, their models and the event (if any) at a venue. Built when a game starts
 // and disposed when it ends, so the menu can switch games without reloading the page.
 
-export type GameMode = 'race' | 'baja' | 'quarry' | 'freeride' | 'attract';
+export type GameMode = 'race' | 'baja' | 'quarry' | 'freeride' | 'attract' | 'tag';
 
 export interface SessionConfig {
   mode: GameMode;
@@ -39,6 +42,24 @@ export interface SessionConfig {
   rivalBike?: BikeId;
   /** Career: exactly these rivals, in grid order. */
   rivals?: string[];
+  /** Multiplayer: who rides where, and which of them are simulated on this machine. */
+  net?: NetGame;
+}
+
+export interface NetGame {
+  /** This machine's peer id. */
+  self: string;
+  host: boolean;
+  roster: RosterEntry[];
+}
+
+/** A rider simulated on another machine. */
+export interface RemoteEntry {
+  rider: RemoteRider;
+  roster: RosterEntry;
+  racer: Racer | null;
+  bikeModel: BikeModel | GltfBikeModel;
+  riderModel: RiderModel | GltfRiderModel;
 }
 
 export interface SessionDeps {
@@ -56,6 +77,8 @@ export interface Entry {
   bikeModel: BikeModel | GltfBikeModel;
   riderModel: RiderModel | GltfRiderModel;
   ai: Driver | null;
+  /** Multiplayer: this rider's roster id. */
+  netId?: string;
 }
 
 /** Every rider who can line up, in the order they fill the field. */
@@ -86,7 +109,10 @@ export class Session {
   readonly sim: Sim;
   readonly event: Competition | null;
   readonly entries: Entry[] = [];
+  readonly remotes: RemoteEntry[] = [];
   readonly human: Entry | null;
+  /** Multiplayer: hold on the line until the host says everyone's loaded. */
+  waiting: boolean;
   private deps: SessionDeps;
 
   constructor(deps: SessionDeps, venue: Venue, config: SessionConfig) {
@@ -99,9 +125,16 @@ export class Session {
     if (config.mode === 'race' || config.mode === 'attract') this.event = new Race(track!, config.mode === 'attract' ? 999 : config.laps);
     else if (config.mode === 'baja') this.event = new BajaRace(venue.waypoints!);
     else if (config.mode === 'quarry') this.event = new StuntChallenge(config.duration);
+    else if (config.mode === 'tag') this.event = new TagGame(config.duration, config.net?.host ?? true);
     else this.event = null;
+    this.waiting = !!config.net && this.event !== null;
     // The attract mode is already under way when the menu appears.
     if (config.mode === 'attract') this.event!.clock = 0;
+
+    if (config.net) {
+      this.human = this.buildNet(config.net);
+      return;
+    }
 
     const human = config.mode !== 'attract';
     const rivals = config.rivals
@@ -125,16 +158,80 @@ export class Session {
     });
     this.human = human ? this.entries[0] : null;
 
+    this.addAiEngines();
+  }
+
+  private addAiEngines() {
     for (const e of this.entries) {
       if (e.ai) {
         const b = e.player.bike;
-        deps.sound.addEngine({ position: () => b.body.translation(), rpm: () => b.rpm, load: () => b.throttle, spec: b.spec });
+        this.deps.sound.addEngine({ position: () => b.body.translation(), rpm: () => b.rpm, load: () => b.throttle, spec: b.spec });
       }
     }
   }
 
-  private add(name: string, colour: BikeColour, kit: number | null, skill: number | null, slot: number, spec: BikeSpec, index = 0) {
-    const { world, scene, bikeGltf, riderGltf } = this.deps;
+  /** Multiplayer: our riders (you, and the host's AI) are simulated here; everyone else is a proxy. */
+  private buildNet(net: NetGame): Entry | null {
+    const skillScale = DIFFICULTY_SKILL[this.config.difficulty];
+    let aiIndex = 0;
+    for (const r of net.roster) {
+      if (r.owner !== net.self) {
+        this.addRemote(r);
+        continue;
+      }
+      const rival = RIDERS.find((x) => x.name === r.name);
+      if (r.ai) {
+        const skill = Math.min(1, (rival?.skill ?? 0.92) * skillScale);
+        this.add(r.name, r.colour, rival?.kit ?? KIT_COLOURS[r.colour], skill, r.slot, BIKES[r.bike], aiIndex++, r.id);
+      } else {
+        this.add(r.name, r.colour, null, null, r.slot, BIKES[r.bike], 0, r.id);
+      }
+    }
+    this.addAiEngines();
+    return this.entries.find((e) => !e.ai) ?? null;
+  }
+
+  private addRemote(r: RosterEntry) {
+    const [pos, yaw] = this.venue.grid(r.slot);
+    const rider = new RemoteRider(this.deps.world, r.id, BIKES[r.bike], pos, yaw);
+    const kit = r.ai ? RIDERS.find((x) => x.name === r.name)?.kit ?? null : null;
+    const { bikeModel, riderModel } = this.models(r.colour, kit);
+    let racer: Racer | null = null;
+    if (this.event) {
+      this.event.add(r.name, rider, false);
+      racer = this.event.racers[this.event.racers.length - 1];
+      racer.remote = true;
+      if (this.event instanceof TagGame) this.event.identify(racer, r.id);
+    }
+    this.deps.sound.addEngine({ position: () => rider.bike.body.translation(), rpm: () => rider.rpm, load: () => rider.throttle, spec: rider.spec });
+    this.remotes.push({ rider, roster: r, racer, bikeModel, riderModel });
+  }
+
+  /** The bike and rider models for a colour (falling back to the placeholders). */
+  private models(colour: BikeColour, kit: number | null) {
+    let bikeModel: BikeModel | GltfBikeModel = new BikeModel();
+    let riderModel: RiderModel | GltfRiderModel = new RiderModel();
+    const { bikeGltf, riderGltf } = this.deps;
+    try {
+      if (bikeGltf) bikeModel = new GltfBikeModel(bikeGltf, colour);
+    } catch (e) {
+      console.warn('bike model unusable, using placeholder', e);
+    }
+    try {
+      // Your kit keeps the model's own red unless you've picked another bike colour.
+      const tint = kit ?? (colour === 'red' ? undefined : KIT_COLOURS[colour]);
+      if (riderGltf) riderModel = new GltfRiderModel(cloneSkinned(riderGltf.scene), tint);
+    } catch (e) {
+      console.warn('rider model unusable, using placeholder', e);
+    }
+    this.deps.scene.add(bikeModel.root, riderModel.root);
+    return { bikeModel, riderModel };
+  }
+
+  private add(
+    name: string, colour: BikeColour, kit: number | null, skill: number | null, slot: number, spec: BikeSpec, index = 0, netId?: string,
+  ) {
+    const { world } = this.deps;
     const venue = this.venue;
     const [pos, yaw] = venue.grid(slot);
     const player = new Player(world, venue.hm, pos, yaw, spec);
@@ -142,32 +239,13 @@ export class Session {
     player.cannonEnabled = venue.cannon;
     this.sim.players.push(player);
 
-    let bikeModel: BikeModel | GltfBikeModel = new BikeModel();
-    let riderModel: RiderModel | GltfRiderModel = new RiderModel();
-    try {
-      if (bikeGltf) {
-        const m = new GltfBikeModel(bikeGltf, colour);
-        bikeModel = m;
-        player.mounts = () => m.mounts();
-      }
-    } catch (e) {
-      console.warn('bike model unusable, using placeholder', e);
-    }
-    try {
-      if (riderGltf) {
-        // Your kit keeps the model's own red unless you've picked another bike colour.
-        const tint = kit ?? (colour === 'red' ? undefined : KIT_COLOURS[colour]);
-        const m = new GltfRiderModel(cloneSkinned(riderGltf.scene), tint);
-        riderModel = m;
-        player.proportions = m.proportions;
-      }
-    } catch (e) {
-      console.warn('rider model unusable, using placeholder', e);
-    }
-    scene.add(bikeModel.root, riderModel.root);
+    const { bikeModel, riderModel } = this.models(colour, kit);
+    if (bikeModel instanceof GltfBikeModel) player.mounts = () => bikeModel.mounts();
+    if (riderModel instanceof GltfRiderModel) player.proportions = riderModel.proportions;
 
     if (this.event) this.event.add(name, player, skill === null);
     const racer = this.event ? this.event.racers[this.event.racers.length - 1] : null;
+    if (racer && netId && this.event instanceof TagGame) this.event.identify(racer, netId);
     if (this.event instanceof BajaRace && racer) {
       // After a crash in the desert: back towards the last waypoint, facing the next.
       const baja = this.event;
@@ -184,19 +262,21 @@ export class Session {
         ai = new AIDriver(player, venue.hm.track, { skill, lane: ((slot % 3) - 1) * Math.min(3.5, venue.hm.track.halfWidth * 0.6) });
       }
     }
-    this.entries.push({ name, player, racer, bikeModel, riderModel, ai });
+    this.entries.push({ name, player, racer, bikeModel, riderModel, ai, netId });
   }
 
   get started() {
-    return !this.event || this.event.started;
+    return !this.event || (!this.waiting && this.event.started);
   }
 
   /** One physics step. `mine` is the human's controls (ignored when nobody is riding). */
   step(mine: Controls, dt: number) {
     const go = this.started;
     const controls = this.entries.map((e) => (e.ai ? e.ai.controls(dt, this.sim.players, go) : go ? mine : HELD));
+    const now = performance.now();
+    for (const r of this.remotes) r.rider.update(now);
     this.sim.step(controls, dt);
-    this.event?.update(dt);
+    if (!this.waiting) this.event?.update(dt);
   }
 
   /** Per rendered frame, before drawing: crash timers and respawns. */
@@ -209,6 +289,30 @@ export class Session {
     for (const e of this.entries) {
       e.bikeModel.update(e.player.bike);
       e.riderModel.setPose(e.player.readPose());
+    }
+    const now = performance.now();
+    for (const r of this.remotes) {
+      r.rider.update(now);
+      r.bikeModel.update(r.rider.bike);
+      r.riderModel.setPose(r.rider.pose);
+    }
+  }
+
+  /** Multiplayer: the state of every rider simulated here, for the wire. */
+  snapshots(now: number) {
+    return this.entries.filter((e) => e.netId).map((e) => ({ id: e.netId!, s: snapshot(e.player, e.player.readPose(), now) }));
+  }
+
+  receive(id: string, s: number[], now: number) {
+    this.remotes.find((r) => r.rider.id === id)?.rider.receive(s, now);
+  }
+
+  /** A player left: take their riders off the track (their results stand as they were). */
+  dropOwner(owner: string) {
+    for (const r of this.remotes.filter((x) => x.roster.owner === owner)) {
+      r.rider.dispose();
+      this.deps.scene.remove(r.bikeModel.root, r.riderModel.root);
+      this.remotes.splice(this.remotes.indexOf(r), 1);
     }
   }
 
@@ -224,6 +328,10 @@ export class Session {
       e.player.dispose();
       this.deps.scene.remove(e.bikeModel.root, e.riderModel.root);
     }
+    for (const r of this.remotes) {
+      r.rider.dispose();
+      this.deps.scene.remove(r.bikeModel.root, r.riderModel.root);
+    }
     this.deps.sound.clearEngines();
   }
 }
@@ -231,4 +339,9 @@ export class Session {
 /** The six rivals who line up against you when you ride `colour`, in grid order. */
 export function rivalsFor(colour: BikeColour) {
   return RIDERS.filter((r) => r.colour !== colour).slice(0, 6).map((r) => r.name);
+}
+
+/** AI riders to fill a multiplayer grid: `n` of them, avoiding the colours players have taken. */
+export function aiRidersFor(taken: BikeColour[], n: number) {
+  return RIDERS.filter((r) => !taken.includes(r.colour)).slice(0, n).map((r) => ({ name: r.name, colour: r.colour }));
 }

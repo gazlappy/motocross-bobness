@@ -165,3 +165,32 @@ body.menu-open:not(.menu-main) .menu-panel {
 .bike-stat { display: flex; align-items: center; gap: 8px; }
 .bike-stat label { width: 52px; font-size: 12px; opacity: 0.7; }
 .bike-stat i { display: block; height: 6px; border-radius: 3px; background: var(--accent); }
+
+.text-input {
+  width: min(220px, 60%); padding: 6px 10px; border-radius: 6px; border: 2px solid rgba(255, 255, 255, 0.15);
+  background: rgba(0, 0, 0, 0.35); color: var(--hud-fg); font: bold 15px 'Trebuchet MS', Verdana, sans-serif;
+}
+.text-input:focus { outline: none; border-color: var(--accent); }
+.code-input { width: 110px; text-transform: uppercase; letter-spacing: 0.3em; text-align: center; font-size: 18px; }
+.menu-btn:disabled { opacity: 0.45; cursor: default; }
+.menu-btn:disabled::before { transform: skewX(-14deg) scaleX(0); }
+.lobby-share { margin: -4px 0 4px; }
+.lobby-players { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; font-size: 15px; }
+.lobby-players li { display: flex; align-items: center; gap: 8px; padding: 5px 8px; border-radius: 6px; background: rgba(255, 255, 255, 0.06); }
+.lobby-players li.me { background: rgba(255, 176, 32, 0.14); }
+.lobby-players li span { margin-left: auto; font-size: 12px; opacity: 0.75; }
+.lobby-players .dot { width: 14px; height: 14px; border-radius: 50%; background: var(--swatch); flex: none; }
+
+.controls-blurb { margin: 0; }
+.bind-table { display: flex; flex-direction: column; gap: 3px; }
+.bind-row { display: flex; align-items: center; gap: 6px; font-size: 14px; }
+.bind-row label { flex: 1; opacity: 0.85; }
+.bind-btn {
+  cursor: pointer; min-width: 74px; padding: 4px 8px; border-radius: 6px; border: 2px solid transparent;
+  background: rgba(255, 255, 255, 0.08); color: var(--hud-fg); font: bold 13px 'Trebuchet MS', Verdana, sans-serif;
+}
+.bind-btn.alt { opacity: 0.75; }
+.bind-btn.wide { min-width: 150px; }
+.bind-btn.on { background: var(--accent); color: #2a1d12; }
+.bind-btn.waiting { border-color: var(--accent); color: var(--accent); }
+.bind-btn:focus { outline: 2px solid var(--hud-fg); outline-offset: 1px; }

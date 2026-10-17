@@ -90,6 +90,13 @@ const _rn = new THREE.Vector3();
 const _qInv = new THREE.Quaternion();
 
 const toR = (v: THREE.Vector3) => ({ x: v.x, y: v.y, z: v.z });
+/** What drawing a bike needs: a physics bike, or a rider seen over the network. */
+export interface BikeView {
+  body: { translation(): { x: number; y: number; z: number }; rotation(): { x: number; y: number; z: number; w: number } };
+  wheels: readonly Pick<WheelState, 'attach' | 'rayLength' | 'spin'>[];
+  steerAngle: number;
+}
+
 const IDLE_CONTROLS: Controls = { throttle: 0, brake: 0, steer: 0, leanForward: 0, leanSide: 0 };
 
 /**

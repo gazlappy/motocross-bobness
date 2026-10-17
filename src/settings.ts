@@ -28,6 +28,10 @@ export interface Settings {
   freeVenue: VenueId;
   /** Bike for single events (career has its own garage). */
   bike: BikeId;
+  /** Your name in multiplayer. */
+  playerName: string;
+  /** Easy: the rider shifts their own weight. Advanced: you do, as in the original. */
+  controlScheme: 'easy' | 'advanced';
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -46,6 +50,8 @@ export const DEFAULT_SETTINGS: Settings = {
   duration: 120,
   freeVenue: 'nationals',
   bike: '250',
+  playerName: 'Rider',
+  controlScheme: 'advanced',
 };
 
 const KEY = 'motocross-bobness:settings';

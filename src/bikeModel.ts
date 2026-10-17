@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import type { Bike } from './bike.ts';
+import type { BikeView } from './bike.ts';
 import { Limb } from './limb.ts';
 
 // Placeholder bike built from primitives. Swap for a glTF model once one is chosen.
@@ -92,7 +92,7 @@ export class BikeModel {
     r.add(this.frontWheel.outer, this.rearWheel.outer);
   }
 
-  update(bike: Bike) {
+  update(bike: BikeView) {
     const t = bike.body.translation();
     const q = bike.body.rotation();
     this.root.position.set(t.x, t.y, t.z);

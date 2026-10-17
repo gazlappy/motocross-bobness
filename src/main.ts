@@ -2,6 +2,8 @@ import * as THREE from 'three';
 import RAPIER from '@dimforge/rapier3d-compat';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { Input } from './input.ts';
+import { loadBindings, keysText, padButtonName, padInputName } from './bindings.ts';
+import { easyAssist } from './assist.ts';
 import { CameraRig } from './camera.ts';
 import { SoundSystem } from './audio/sound.ts';
 import { Session, type SessionConfig } from './session.ts';
@@ -16,6 +18,10 @@ import type { Venue, VenueId } from './venue.ts';
 import { buildVenue } from './venues/index.ts';
 import { PoseInterpolator } from './interpolation.ts';
 import { type EventPayout, SEASON, TIERS, eventConfig, loadCareer, money, recordEvent } from './career.ts';
+import { TagGame } from './tag.ts';
+import { Lobby } from './net/lobby.ts';
+import type { NetSetup, RosterEntry } from './net/protocol.ts';
+import type { Racer } from './competition.ts';
 import bikeUrl from '../assets/models/Bike/mid_poly_dirt_bike.glb?url';
 import riderUrl from '../assets/models/Rider/low-poly_motocross_character_rigged.glb?url';
 
@@ -58,7 +64,8 @@ const [bikeGltf, riderGltf] = await Promise.all(
   [bikeUrl, riderUrl].map((url) => loader.loadAsync(url).catch((e) => (console.warn(`model ${url} failed`, e), null))),
 );
 
-const input = new Input();
+const bindings = loadBindings();
+const input = new Input(bindings);
 const sound = new SoundSystem();
 const settings = loadSettings();
 const deps = { world, scene, bikeGltf, riderGltf, sound };
@@ -168,6 +175,23 @@ arrow.renderOrder = 10;
 arrow.visible = false;
 scene.add(arrow);
 
+/** Tag: a big arrow over whoever is it. */
+const itMarker = new THREE.Group();
+{
+  const mat = new THREE.MeshBasicMaterial({ color: 0xff3b1f, transparent: true, opacity: 0.9, depthTest: false });
+  const cone = new THREE.Mesh(new THREE.ConeGeometry(0.55, 1.1, 4).rotateX(Math.PI), mat);
+  cone.position.y = 3.3;
+  const column = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.35, 0.35, 60, 8, 1, true),
+    new THREE.MeshBasicMaterial({ color: 0xff3b1f, transparent: true, opacity: 0.18, depthWrite: false, side: THREE.DoubleSide }),
+  );
+  column.position.y = 34;
+  itMarker.add(cone, column);
+  itMarker.renderOrder = 10;
+  itMarker.visible = false;
+  scene.add(itMarker);
+}
+
 const ATTRACT: SessionConfig = {
   mode: 'attract', venue: 'nationals', laps: 999, opponents: 7, difficulty: 'medium', colour: 'red', duration: 0,
 };
@@ -203,7 +227,7 @@ function attachHud() {
   const me = session.human;
   if (!me) return;
   const p = me.player;
-  p.bike.autoShift = settings.gearbox === 'auto';
+  p.bike.autoShift = settings.gearbox === 'auto' || settings.controlScheme === 'easy';
   p.stunts.onTrick = (name, points) => {
     if (performance.now() < trickHoldUntil) return;
     showTrick(name ? `${name}<b>${Math.round(points).toLocaleString()}</b>` : '', false);
@@ -235,6 +259,12 @@ function attachHud() {
       flashBanner(`LAP ${lap + 1}<small>${clockText(time)}</small>`, 1500);
     }
   };
+  if (event instanceof TagGame) {
+    event.onTag = (it, by) => {
+      lobby.sendTag(event.ids.get(it)!, event.times());
+      announceTag(it, by);
+    };
+  }
   if (event instanceof BajaRace) {
     event.onWaypoint = (r, i) => {
       if (!r.human || i === event.waypoints.length - 1) return;
@@ -243,6 +273,9 @@ function attachHud() {
     };
   }
   event.onFinish = (r, place) => {
+    // Multiplayer: our riders' finishes are ours to announce.
+    const local = session.entries.find((e) => e.racer === r && e.netId);
+    if (local && !(event instanceof TagGame)) lobby.sendFinish(local.netId!, r.finishTime);
     if (r.human && careerRun) {
       careerRun = false;
       const order = event instanceof StuntChallenge ? null : event.standings().map((x) => x.name);
@@ -251,7 +284,9 @@ function attachHud() {
     if (r.human) {
       const msg = event instanceof StuntChallenge
         ? `TIME UP!<small>${p.stunts.total.toLocaleString()} points${event.newBest ? ' · new best!' : ''}</small>`
-        : `${ordinal(place).toUpperCase()}!<small>${clockText(r.finishTime)}</small>`;
+        : event instanceof TagGame
+          ? `TIME UP!<small>${ordinal(place)} · ${clockText(event.timeIt.get(r) ?? 0)} as it</small>`
+          : `${ordinal(place).toUpperCase()}!<small>${clockText(r.finishTime)}</small>`;
       flashBanner(msg, 2500);
       sound.cheer(1);
       resultsTimer = window.setTimeout(() => {
@@ -263,6 +298,12 @@ function attachHud() {
       menu.showResults(t.html + careerSummary, t.title, careerSummary !== '');
     }
   };
+}
+
+function announceTag(it: Racer, by: Racer | null) {
+  sound.score();
+  if (it.human) flashBanner(`YOU'RE IT!<small>${by ? `tagged by ${by.name}` : 'get someone!'}</small>`, 1600);
+  else flashBanner(`${it.name.toUpperCase()} IS IT!`, 1300);
 }
 
 /** What a career event paid, shown under its results. */
@@ -280,12 +321,25 @@ function updateEventHud() {
   const me = session.human;
   const event = session.event;
   arrow.visible = false;
+  itMarker.visible = false;
   if (!me) return;
   if (!event) {
     hud.race.innerHTML = `FREE RIDE · ${venue.name.toUpperCase()} &nbsp; <b>Esc</b> for the menu`;
     return;
   }
   const r = me.racer!;
+  if (session.waiting) {
+    hud.race.innerHTML = 'WAITING FOR THE OTHER RIDERS...';
+    return;
+  }
+  if (event instanceof TagGame) {
+    const it = event.it;
+    itMarker.visible = it !== null && !it.finished;
+    if (it) {
+      const t = it.player.bike.body.translation();
+      itMarker.position.set(t.x, t.y, t.z);
+    }
+  }
   if (!event.started) {
     const n = Math.ceil(-event.clock);
     if (n !== lastCount && n <= 3 && n >= 1) {
@@ -322,6 +376,21 @@ function updateEventHud() {
   }
 }
 
+/** The controls help, from the current key and pad bindings. */
+function helpHtml() {
+  const k = (a: Parameters<typeof keysText>[1]) => `<b>${keysText(bindings, a)}</b>`;
+  const pad = bindings.pad;
+  const lean = settings.controlScheme === 'easy'
+    ? `${k('leanForward')}${k('leanBack')}${k('leanLeft')}${k('leanRight')} lean (optional: Easy controls lean for you)`
+    : `${k('leanForward')}/${k('leanBack')} lean fwd/back &nbsp; ${k('leanLeft')}/${k('leanRight')} lean sideways`;
+  return `${k('throttle')} throttle &nbsp; ${k('brake')} brake &nbsp; ${k('steerLeft')}/${k('steerRight')} steer &nbsp; ${lean} &nbsp; ` +
+    `${k('stunt1')}/${k('stunt2')} + lean keys: stunts (in the air) &nbsp; ${k('shiftDown')}/${k('shiftUp')} shift &nbsp; ${k('toggleAuto')} auto/manual &nbsp; ` +
+    `${k('camera')} camera &nbsp; ${k('reset')} reset / skip wipeout &nbsp; ${k('mute')} mute &nbsp; ${k('help')} hide help` +
+    `<br />Gamepad: ${padInputName(pad.analog.throttle)} gas, ${padInputName(pad.analog.brake)} brake, ${padInputName(pad.analog.steer)} steer, ` +
+    `${padInputName(pad.analog.leanFB)} / ${padInputName(pad.analog.leanLR)} lean, ${padButtonName(pad.buttons.stunt1)}/${padButtonName(pad.buttons.stunt2)} + lean: stunts, ` +
+    `${padButtonName(pad.buttons.reset)} reset, ${padButtonName(pad.buttons.camera)} camera &nbsp; Rebind in Options &gt; Controls`;
+}
+
 function applySettings(s: Settings) {
   sound.setVolume(s.volume);
   if (sound.isMuted !== s.muted) sound.toggleMute();
@@ -337,11 +406,14 @@ function applySettings(s: Settings) {
   }
   hud.speedUnit.textContent = s.units === 'kmh' ? 'KM/H' : 'MPH';
   const me = session?.human;
-  if (me) me.player.bike.autoShift = s.gearbox === 'auto';
+  if (me) me.player.bike.autoShift = s.gearbox === 'auto' || s.controlScheme === 'easy';
+  hud.help.innerHTML = helpHtml();
   if (me && rig && rig.mode !== s.camera) rig.setMode(s.camera);
 }
 
-const menu = new Menu(document.getElementById('menu')!, settings, career, {
+const lobby = new Lobby();
+
+const menu = new Menu(document.getElementById('menu')!, settings, career, lobby, bindings, {
   start(config) {
     careerRun = false;
     careerSummary = '';
@@ -374,8 +446,61 @@ const menu = new Menu(document.getElementById('menu')!, settings, career, {
     careerRun = false;
     void goToMenu();
   },
+  leaveRoom() {
+    lobby.leave();
+    void goToMenu();
+  },
   settingsChanged: applySettings,
 });
+
+// ---- Multiplayer ----------------------------------------------------------------------------------
+
+function netConfig(setup: NetSetup, roster: RosterEntry[]): SessionConfig {
+  const mine = roster.find((r) => r.owner === lobby.selfId && !r.ai);
+  return {
+    mode: setup.mode, venue: setup.venue, laps: setup.laps, opponents: 0, difficulty: setup.difficulty,
+    colour: mine?.colour ?? settings.colour, duration: setup.duration, bike: mine?.bike,
+    net: { self: lobby.selfId, host: lobby.isHost, roster },
+  };
+}
+
+lobby.onChange = () => menu.lobbyChanged();
+lobby.onStart = (setup, roster) => {
+  // Joined just as it started: sit this one out in the lobby.
+  if (!roster.some((r) => r.owner === lobby.selfId)) return;
+  menu.hide();
+  careerRun = false;
+  careerSummary = '';
+  countdownCaption = '';
+  lastConfig = netConfig(setup, roster);
+  void begin(lastConfig).then(() => lobby.markReady());
+};
+lobby.onGo = () => {
+  if (session.config.net) session.waiting = false;
+};
+lobby.onSnap = (id, s) => session.receive(id, s, performance.now());
+lobby.onFinish = (id, time) => {
+  const racer = session.remotes.find((r) => r.rider.id === id)?.racer;
+  if (racer) session.event?.finishRacer?.(racer, time);
+};
+lobby.onTag = (itId, times) => {
+  const event = session.event;
+  if (!(event instanceof TagGame)) return;
+  const before = event.it;
+  event.applyTag(itId, times);
+  if (event.it && event.it !== before) announceTag(event.it, before);
+};
+lobby.onLeft = (id) => {
+  const gone = session.remotes.find((r) => r.roster.owner === id);
+  session.dropOwner(id);
+  if (gone && session.human) flashBanner(`${gone.roster.name.toUpperCase()} LEFT`, 1500);
+};
+lobby.onEnd = () => {
+  void begin(ATTRACT).then(() => menu.showLobby());
+};
+lobby.onClosed = (reason) => {
+  void begin(ATTRACT).then(() => menu.showLobby(reason));
+};
 
 async function goToMenu() {
   await begin(ATTRACT);
@@ -396,6 +521,8 @@ await goToMenu();
 const IDLE = { throttle: 0, brake: 0, steer: 0, leanForward: 0, leanSide: 0 };
 let accumulator = 0;
 let last = performance.now();
+let lastSnap = 0;
+let lastTagSync = 0;
 
 function frame(now: number) {
   requestAnimationFrame(frame);
@@ -403,8 +530,9 @@ function frame(now: number) {
   last = now;
   if (!hud.loading.hidden) return; // a venue is being built
   const me = session.human;
-  // A game freezes while its pause menu is up; the attract mode and the results keep going.
-  const running = !me || !menu.visible || menu.screenName === 'results';
+  // A game freezes while its pause menu is up; the attract mode, the results and network games keep going.
+  const net = !!session.config.net;
+  const running = !me || !menu.visible || menu.screenName === 'results' || net;
   const playing = me !== null && !menu.visible;
 
   for (const a of input.takeActions()) {
@@ -430,9 +558,15 @@ function frame(now: number) {
   if (running) {
     accumulator += dt;
     let steps = 0;
+    const easy = playing && settings.controlScheme === 'easy';
     while (accumulator >= PHYSICS_DT && steps < MAX_STEPS_PER_FRAME) {
       interp.record();
-      session.step(playing ? mine : IDLE, PHYSICS_DT);
+      let c = playing ? mine : IDLE;
+      if (easy && me) {
+        c = { ...mine };
+        easyAssist(me.player.bike, c);
+      }
+      session.step(c, PHYSICS_DT);
       accumulator -= PHYSICS_DT;
       steps++;
     }
@@ -441,6 +575,14 @@ function frame(now: number) {
     // Draw part way between the last two physics steps so motion is smooth at any refresh rate.
     interp.apply(accumulator / PHYSICS_DT);
     session.render();
+  }
+  if (net && now - lastSnap > 50) {
+    lastSnap = now;
+    lobby.sendSnaps(session.snapshots(now));
+  }
+  if (net && lobby.isHost && session.event instanceof TagGame && session.event.it && now - lastTagSync > 1000) {
+    lastTagSync = now;
+    lobby.sendTag(session.event.ids.get(session.event.it)!, session.event.times());
   }
 
   const star = session.star;
@@ -464,4 +606,4 @@ function frame(now: number) {
 requestAnimationFrame(frame);
 
 // Handy for poking at the sim from the dev console.
-Object.assign(window, { game: { get session() { return session; }, get venue() { return venue; }, world, interp, rig: () => rig, sound, scene, menu, settings, venues } });
+Object.assign(window, { game: { get session() { return session; }, get venue() { return venue; }, world, interp, lobby, rig: () => rig, sound, scene, menu, settings, venues } });

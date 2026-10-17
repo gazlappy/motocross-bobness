@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type { GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import type { Bike } from './bike.ts';
+import type { BikeView } from './bike.ts';
 import { type BikeMounts, createMounts } from './riderPose.ts';
 
 // The "Mid poly dirt bike" model (see CREDITS.md). The file holds seven colour variants, each split
@@ -123,7 +123,7 @@ export class GltfBikeModel {
     return m;
   }
 
-  update(bike: Bike) {
+  update(bike: BikeView) {
     const t = bike.body.translation(), q = bike.body.rotation();
     this.root.position.set(t.x, t.y, t.z);
     this.root.quaternion.set(q.x, q.y, q.z, q.w);

@@ -1,7 +1,6 @@
 import * as THREE from 'three';
-import type { Player } from './player.ts';
 import type { Track } from './track.ts';
-import { type Competition, type Racer, type ResultsTable, newRacer } from './competition.ts';
+import { type Competition, type Contestant, type Racer, type ResultsTable, newRacer } from './competition.ts';
 import { clockText, ordinal } from './format.ts';
 
 export type { Racer } from './competition.ts';
@@ -40,7 +39,7 @@ export class Race implements Competition {
     return [new THREE.Vector3(p.x + p.tz * lateral, 0, p.z - p.tx * lateral), Math.atan2(-p.tx, -p.tz)];
   }
 
-  add(name: string, player: Player, human: boolean) {
+  add(name: string, player: Contestant, human: boolean) {
     const t = player.bike.body.translation();
     const hit = this.track.nearest(t.x, t.z, 100);
     this.racers.push(newRacer(name, player, human, hit?.s ?? 0));
@@ -55,7 +54,7 @@ export class Race implements Competition {
     this.clock += dt;
     if (!this.started) return;
     for (const r of this.racers) {
-      if (r.finished) continue;
+      if (r.finished || r.pending) continue;
       const t = r.player.bike.body.translation();
       let hit = this.track.follow(t.x, t.z, r.s, 30);
       // Lost the thread (respawn, cannon): search properly.
@@ -80,10 +79,17 @@ export class Race implements Competition {
     r.lap++;
     r.lapStart = this.clock;
     if (r.lap > this.laps) {
-      r.finished = true;
-      r.finishTime = this.clock;
-      this.onFinish?.(r, ++this.finishedCount);
+      if (r.remote) r.pending = true;
+      else this.finishRacer(r, this.clock);
     }
+  }
+
+  finishRacer(r: Racer, time: number) {
+    if (r.finished) return;
+    r.finished = true;
+    r.pending = false;
+    r.finishTime = time;
+    this.onFinish?.(r, ++this.finishedCount);
   }
 
   /** How far round the race a racer is, for ordering. */

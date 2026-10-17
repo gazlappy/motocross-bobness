@@ -7,6 +7,13 @@ import { BIKES, BIKE_IDS, type BikeId } from './bikes.ts';
 import {
   type Career, SEASON, TIERS, YOU, buyBike, canEnter, currentEvent, money, newCareer, rideBike, saveCareer, standings, startSeason,
 } from './career.ts';
+import { type Lobby, MAX_RIDERS } from './net/lobby.ts';
+import type { NetSetup } from './net/protocol.ts';
+import {
+  type Bindings, KEY_ACTIONS, type KeyAction, PAD_ANALOG, PAD_BUTTONS, type PadAnalog, type PadButton,
+  bindKey, bindPadButton, defaultBindings, keyName, padButtonName, padInputName, saveBindings, unbindKey,
+} from './bindings.ts';
+import { activePad } from './input.ts';
 
 // The front end: main menu over the attract-mode race, game select, options, credits, pause and
 // results. Plain DOM, driven by mouse, keyboard (arrows, Enter, Esc) or the gamepad's Start.
@@ -21,9 +28,11 @@ export interface MenuHandlers {
   careerEvent(): void;
   /** Leave a finished career event for the career screen. */
   toCareer(): void;
+  /** Leave the multiplayer room (from a game or the lobby). */
+  leaveRoom(): void;
 }
 
-type Screen = 'main' | 'select' | 'options' | 'credits' | 'pause' | 'results' | 'career' | 'garage';
+type Screen = 'main' | 'select' | 'options' | 'credits' | 'pause' | 'results' | 'career' | 'garage' | 'multiplayer' | 'lobby' | 'controls';
 
 interface Mode {
   id: string;
@@ -39,6 +48,15 @@ const MODES: Mode[] = [
   { id: 'baja', mode: 'baja', venue: 'baja', name: 'Baja', blurb: 'Open desert, waypoint to waypoint. Pick your own line.' },
   { id: 'quarry', mode: 'quarry', venue: 'quarry', name: 'Stunt Quarry', blurb: 'Huge ramps and banks. Score the most stunt points in time.' },
   { id: 'freeride', mode: 'freeride', venue: null, name: 'Free Ride', blurb: 'Any venue to yourself. Practise lines, stunts and the cannon.' },
+];
+
+/** The games a multiplayer host can set up. */
+const NET_GAMES: { label: string; mode: NetSetup['mode']; venue: VenueId | null }[] = [
+  { label: 'Nationals', mode: 'race', venue: 'nationals' },
+  { label: 'Supercross', mode: 'race', venue: 'supercross' },
+  { label: 'Baja', mode: 'baja', venue: 'baja' },
+  { label: 'Tag', mode: 'tag', venue: null },
+  { label: 'Free Ride', mode: 'freeride', venue: null },
 ];
 
 const VENUE_NAMES: Record<VenueId, string> = { nationals: 'Nationals', supercross: 'Supercross', baja: 'Baja', quarry: 'Quarry' };
@@ -64,11 +82,22 @@ export class Menu {
   private career: Career;
   private tier = 0;
   private confirming = '';
+  private lobby: Lobby;
+  private netStatus = '';
+  private netBusy = false;
+  private joinCode = '';
+  private bindings: Bindings;
+  private controlsTab: 'keyboard' | 'gamepad' = 'keyboard';
+  /** What's waiting for a key or pad input, and how to stop waiting. */
+  private capture: { label: string; stop: () => void } | null = null;
+  private controlsNote = '';
 
-  constructor(root: HTMLElement, settings: Settings, career: Career, handlers: MenuHandlers) {
+  constructor(root: HTMLElement, settings: Settings, career: Career, lobby: Lobby, bindings: Bindings, handlers: MenuHandlers) {
     this.root = root;
     this.settings = settings;
     this.career = career;
+    this.lobby = lobby;
+    this.bindings = bindings;
     this.tier = career.unlocked;
     this.h = handlers;
     this.panel = el('div', 'menu-panel');
@@ -104,6 +133,18 @@ export class Menu {
   showCareer() {
     this.open('main', true);
     this.open('career');
+  }
+
+  /** The multiplayer lobby (or the join screen with a message, if the room has gone). */
+  showLobby(message = '') {
+    this.netStatus = message;
+    this.open('main', true);
+    this.open(this.lobby.room ? 'lobby' : 'multiplayer');
+  }
+
+  /** Something changed in the room: redraw if it's on screen. */
+  lobbyChanged() {
+    if (this.screen === 'lobby' || this.screen === 'multiplayer') this.render();
   }
 
   hide() {
@@ -147,6 +188,7 @@ export class Menu {
   }
 
   private render() {
+    if (this.capture && this.screen !== 'controls') this.stopCapture();
     this.panel.innerHTML = '';
     this.panel.dataset.screen = this.screen ?? '';
     const s = this.screen;
@@ -157,6 +199,9 @@ export class Menu {
     else if (s === 'pause') this.renderPause();
     else if (s === 'results') this.renderResults();
     else if (s === 'career') this.renderCareer();
+    else if (s === 'multiplayer') this.renderMultiplayer();
+    else if (s === 'lobby') this.renderLobby();
+    else if (s === 'controls') this.renderControls();
     else if (s === 'garage') this.renderGarage();
     this.focusables()[0]?.focus();
   }
@@ -176,6 +221,7 @@ export class Menu {
   private renderMain() {
     this.button('Career', () => this.open('career'));
     this.button('Single Event', () => this.open('select'));
+    this.button('Multiplayer', () => this.open(this.lobby.room ? 'lobby' : 'multiplayer'));
     this.button('Options', () => this.open('options'));
     this.button('Credits', () => this.open('credits'));
     this.panel.append(el('p', 'menu-foot', 'A tribute to Motocross Madness (1998).<br>Arrows + Enter, or the mouse.'));
@@ -213,7 +259,7 @@ export class Menu {
         (v) => this.set({ freeVenue: v }), (v) => VENUE_NAMES[v]));
     }
     setup.append(
-      this.segmented<BikeId>('Bike', BIKE_IDS, st.bike, (v) => this.set({ bike: v }), (v) => BIKES[v].name.replace('cc ', ' ').replace('two-stroke', '2T').replace('four-stroke', '4T')),
+      this.bikePicker(),
       this.colourPicker(),
     );
     this.panel.append(setup);
@@ -277,10 +323,14 @@ export class Menu {
       this.segmented('Controls help', ['show', 'hide'], st.showHelp ? 'show' : 'hide', (v) => this.set({ showHelp: v === 'show' })),
     );
     this.panel.append(list);
-    this.panel.append(el('div', 'controls-ref',
-      '<b>W</b> throttle · <b>S</b> brake · <b>A/D</b> steer · <b>↑↓←→</b> lean · <b>Space/Shift + arrows</b> stunts · ' +
-      '<b>Q/E</b> shift · <b>C</b> camera · <b>R</b> reset · <b>N</b> mute · <b>Esc</b> pause'));
-    this.button('Back', () => this.back(), 'menu-btn small');
+    const row = el('div', 'menu-row');
+    for (const [label, fn] of [['Controls', () => this.open('controls')], ['Back', () => this.back()]] as const) {
+      const b = el('button', 'menu-btn small', label);
+      b.type = 'button';
+      b.addEventListener('click', fn);
+      row.append(b);
+    }
+    this.panel.append(row);
   }
 
   private renderCredits() {
@@ -297,14 +347,19 @@ export class Menu {
   }
 
   private renderPause() {
-    this.title('Paused');
+    const net = this.lobby.room !== null;
+    this.title(net ? 'Menu' : 'Paused');
+    if (net) this.panel.append(el('p', 'career-note', 'The game carries on while this menu is open.'));
     this.button('Resume', () => this.resume());
-    this.button('Restart', () => {
-      this.hide();
-      this.h.restart();
-    });
+    if (!net) {
+      this.button('Restart', () => {
+        this.hide();
+        this.h.restart();
+      });
+    }
     this.button('Options', () => this.open('options'));
-    this.button('Quit to menu', () => this.h.quit());
+    if (net && this.lobby.isHost) this.button('End game for everyone', () => this.lobby.end());
+    this.button(net ? 'Leave the room' : 'Quit to menu', () => (net ? this.h.leaveRoom() : this.h.quit()));
   }
 
   private renderResults() {
@@ -312,6 +367,12 @@ export class Menu {
     this.panel.append(el('div', 'results-table', this.resultsHtml));
     if (this.resultsCareer) {
       this.button('Continue', () => this.h.toCareer(), 'menu-btn go');
+      return;
+    }
+    if (this.lobby.room) {
+      if (this.lobby.isHost) this.button('Back to the lobby', () => this.lobby.end(), 'menu-btn go');
+      else this.panel.append(el('p', 'career-note', 'Waiting for the host to start the next game.'));
+      this.button('Leave the room', () => this.h.leaveRoom());
       return;
     }
     this.button('Go again', () => {
@@ -458,6 +519,336 @@ export class Menu {
     this.button('Back', () => this.back(), 'menu-btn small');
   }
 
+
+  /** You, as the room sees you. */
+  me() {
+    const st = this.settings;
+    return { name: st.playerName.trim().slice(0, 16) || 'Rider', colour: st.colour, bike: st.bike };
+  }
+
+  private bikePicker() {
+    return this.segmented<BikeId>('Bike', BIKE_IDS, this.settings.bike, (v) => this.set({ bike: v }), shortBike);
+  }
+
+  private renderMultiplayer() {
+    this.title('Multiplayer');
+    const setup = el('div', 'setup');
+    const nameRow = el('div', 'setting', '<label>Your name</label>');
+    const name = el('input', 'text-input') as HTMLInputElement;
+    name.type = 'text';
+    name.maxLength = 16;
+    name.value = this.settings.playerName;
+    name.addEventListener('input', () => this.set({ playerName: name.value }, false));
+    nameRow.append(name);
+    setup.append(nameRow, this.bikePicker(), this.colourPicker());
+    this.panel.append(setup);
+
+    const host = this.button(this.netBusy ? 'Connecting...' : 'Host a game', () => void this.connect(() => this.lobby.host({ id: '', ...this.me() })), 'menu-btn go');
+    host.disabled = this.netBusy;
+
+    const joinRow = el('div', 'menu-row');
+    const code = el('input', 'text-input code-input') as HTMLInputElement;
+    code.type = 'text';
+    code.maxLength = 5;
+    code.placeholder = 'CODE';
+    code.value = this.joinCode;
+    code.addEventListener('input', () => (this.joinCode = code.value.toUpperCase()));
+    code.addEventListener('keydown', (e) => {
+      if (e.code === 'Enter') join.click();
+    });
+    const join = el('button', 'menu-btn', 'Join') as HTMLButtonElement;
+    join.type = 'button';
+    join.disabled = this.netBusy;
+    join.addEventListener('click', () => {
+      if (this.joinCode.trim().length < 5) {
+        this.netStatus = 'Type the 5-letter room code from the host.';
+        this.render();
+        return;
+      }
+      void this.connect(() => this.lobby.join(this.joinCode, { id: '', ...this.me() }));
+    });
+    joinRow.append(code, join);
+    this.panel.append(joinRow);
+    if (this.netStatus) this.panel.append(el('p', 'career-note', this.netStatus));
+    this.panel.append(el('p', 'menu-foot', 'Up to 8 riders. The host shares a room code; friends type it in to join. Browsers connect directly (WebRTC).'));
+    this.button('Back', () => this.back(), 'menu-btn small');
+  }
+
+  private async connect(how: () => Promise<void>) {
+    this.netBusy = true;
+    this.netStatus = '';
+    this.render();
+    try {
+      await how();
+      this.netBusy = false;
+      this.screen = 'lobby';
+      this.render();
+    } catch (e) {
+      this.netBusy = false;
+      this.netStatus = e instanceof Error ? e.message : String(e);
+      this.render();
+    }
+  }
+
+  private renderLobby() {
+    const lobby = this.lobby;
+    const host = lobby.isHost;
+    this.title(`Room ${lobby.code}`);
+    this.panel.append(el('p', 'menu-foot lobby-share', host ? 'Share this code with friends so they can join.' : 'Connected.'));
+
+    const list = el('ul', 'lobby-players');
+    for (const p of lobby.players) {
+      const tags = [p.id === lobby.hostId ? 'host' : '', p.id === lobby.selfId ? 'you' : ''].filter(Boolean).join(', ');
+      const li = el('li', p.id === lobby.selfId ? 'me' : '',
+        `<i class="dot" style="--swatch:#${KIT_COLOURS[p.colour].toString(16).padStart(6, '0')}"></i><b>${escapeHtml(p.name)}</b><span>${shortBike(p.bike)}${tags ? ` · ${tags}` : ''}</span>`);
+      list.append(li);
+    }
+    this.panel.append(list);
+
+    const st = lobby.setup;
+    const game = NET_GAMES.find((g) => g.mode === st.mode && (g.venue === null || g.venue === st.venue)) ?? NET_GAMES[0];
+    const setup = el('div', 'setup');
+    if (host) {
+      setup.append(this.segmented('Game', NET_GAMES.map((g) => g.label), game.label, (label) => {
+        const g = NET_GAMES.find((x) => x.label === label)!;
+        const venue = g.venue ?? (g.mode === 'tag' ? (st.venue === 'quarry' ? 'quarry' : 'baja') : st.venue);
+        lobby.configure({ mode: g.mode, venue });
+      }));
+      if (st.mode === 'race') setup.append(this.segmented('Laps', [1, 3, 5], st.laps, (v) => lobby.configure({ laps: v })));
+      if (st.mode === 'race' || st.mode === 'baja') {
+        setup.append(this.segmented('AI riders', [0, 1, 2, 3, 4, 5, 6], st.ai, (v) => lobby.configure({ ai: v })));
+        if (st.ai > 0) setup.append(this.segmented<Difficulty>('AI skill', ['easy', 'medium', 'hard'], st.difficulty, (v) => lobby.configure({ difficulty: v })));
+      }
+      if (st.mode === 'tag') {
+        setup.append(
+          this.segmented<VenueId>('Where', ['baja', 'quarry'], st.venue, (v) => lobby.configure({ venue: v }), (v) => VENUE_NAMES[v]),
+          this.segmented('Time', [120, 180, 300], st.duration, (v) => lobby.configure({ duration: v }), (v) => `${v / 60} min`),
+        );
+      }
+      if (st.mode === 'freeride') {
+        setup.append(this.segmented<VenueId>('Where', ['nationals', 'supercross', 'baja', 'quarry'], st.venue, (v) => lobby.configure({ venue: v }), (v) => VENUE_NAMES[v]));
+      }
+    } else {
+      const bits = [game.label];
+      if (st.mode === 'race') bits.push(`${st.laps} lap${st.laps > 1 ? 's' : ''}`);
+      if ((st.mode === 'race' || st.mode === 'baja') && st.ai > 0) bits.push(`${st.ai} AI rider${st.ai > 1 ? 's' : ''} (${st.difficulty})`);
+      if (st.mode === 'tag' || st.mode === 'freeride') bits.push(VENUE_NAMES[st.venue]);
+      if (st.mode === 'tag') bits.push(`${st.duration / 60} min`);
+      setup.append(el('div', 'setting', `<label>Game</label><span>${bits.join(' · ')}</span>`));
+    }
+    setup.append(this.bikePicker(), this.colourPicker());
+    this.panel.append(setup);
+
+    if (lobby.inGame) {
+      this.panel.append(el('p', 'career-note', 'A game is on. You will join the next one.'));
+    } else if (host) {
+      const tooFew = st.mode === 'tag' && lobby.players.length < 2;
+      if (tooFew) this.panel.append(el('p', 'career-note', 'Tag needs at least two players.'));
+      const go = this.button('Start', () => lobby.start(), 'menu-btn go');
+      go.disabled = tooFew;
+    } else {
+      this.panel.append(el('p', 'career-note', 'Waiting for the host to start.'));
+    }
+    this.button('Leave the room', () => this.h.leaveRoom(), 'menu-btn small');
+    if (lobby.players.length >= MAX_RIDERS) this.panel.append(el('p', 'menu-foot', 'The room is full.'));
+  }
+
+
+  private renderControls() {
+    this.title('Controls');
+    const st = this.settings;
+    const setup = el('div', 'setup');
+    setup.append(this.segmented('Riding', ['easy', 'advanced'], st.controlScheme, (v) => this.set({ controlScheme: v as Settings['controlScheme'] })));
+    setup.append(el('p', 'menu-foot controls-blurb', st.controlScheme === 'easy'
+      ? 'Easy: steer, gas and brake. Your rider levels the bike in the air for the landing and keeps the front down pulling away; gears are automatic. Lean by hand any time to take over.'
+      : 'Advanced: the original controls. You shift the rider\'s weight: forward and back to control wheelies and set up landings, sideways in turns and in the air.'));
+    setup.append(this.segmented('Device', ['keyboard', 'gamepad'], this.controlsTab, (v) => {
+      this.stopCapture();
+      this.controlsTab = v as 'keyboard' | 'gamepad';
+      this.controlsNote = '';
+      this.render();
+    }));
+    this.panel.append(setup);
+
+    const table = el('div', 'bind-table');
+    const b = this.bindings;
+    if (this.controlsTab === 'keyboard') {
+      for (const a of KEY_ACTIONS) {
+        const row = el('div', 'bind-row', `<label>${a.label}</label>`);
+        for (const slot of [0, 1]) {
+          const code = b.keys[a.id][slot];
+          const waiting = this.capture?.label === `key:${a.id}:${slot}`;
+          const btn = el('button', `bind-btn${waiting ? ' waiting' : ''}${slot ? ' alt' : ''}`,
+            waiting ? 'Press a key...' : code ? keyName(code) : slot ? '+' : '-');
+          btn.type = 'button';
+          btn.title = slot ? 'Alternate key' : 'Main key';
+          btn.addEventListener('click', () => this.captureKey(a.id, slot));
+          row.append(btn);
+        }
+        table.append(row);
+      }
+      this.panel.append(table);
+      this.panel.append(el('p', 'menu-foot', 'Click a key to change it, then press the new one. Esc cancels; Backspace clears it.'));
+    } else {
+      const pad = activePad();
+      this.panel.append(el('p', 'menu-foot', pad ? `Controller: ${escapeHtml(pad.id.slice(0, 60))}` : 'No controller found: connect one and press any button on it.'));
+      for (const a of PAD_ANALOG) {
+        const p = b.pad.analog[a.id];
+        const waiting = this.capture?.label === `analog:${a.id}`;
+        const row = el('div', 'bind-row', `<label>${a.label}</label>`);
+        const btn = el('button', `bind-btn wide${waiting ? ' waiting' : ''}`,
+          waiting ? (a.twoWay ? `Push the stick ${a.id === 'leanFB' ? 'forward' : 'right'}...` : 'Press a trigger or button...') : padInputName(p));
+        btn.type = 'button';
+        btn.addEventListener('click', () => this.capturePadAnalog(a.id, a.twoWay));
+        row.append(btn);
+        if (p?.kind === 'axis') {
+          const inv = el('button', `bind-btn${p.invert ? ' on' : ''}`, 'Invert');
+          inv.type = 'button';
+          inv.addEventListener('click', () => {
+            p.invert = !p.invert;
+            this.bindingsChanged();
+          });
+          row.append(inv);
+        }
+        table.append(row);
+      }
+      for (const a of PAD_BUTTONS) {
+        const waiting = this.capture?.label === `button:${a.id}`;
+        const row = el('div', 'bind-row', `<label>${a.label}</label>`);
+        const btn = el('button', `bind-btn wide${waiting ? ' waiting' : ''}`, waiting ? 'Press a button...' : padButtonName(b.pad.buttons[a.id]));
+        btn.type = 'button';
+        btn.addEventListener('click', () => this.capturePadButton(a.id));
+        row.append(btn);
+        table.append(row);
+      }
+      this.panel.append(table);
+    }
+    if (this.controlsNote) this.panel.append(el('p', 'career-note', this.controlsNote));
+
+    const row = el('div', 'menu-row');
+    const reset = el('button', 'menu-btn small', `Reset ${this.controlsTab}`);
+    reset.type = 'button';
+    reset.addEventListener('click', () => {
+      this.stopCapture();
+      const d = defaultBindings();
+      if (this.controlsTab === 'keyboard') this.bindings.keys = d.keys;
+      else this.bindings.pad = d.pad;
+      this.controlsNote = '';
+      this.bindingsChanged();
+    });
+    const back = el('button', 'menu-btn small', 'Back');
+    back.type = 'button';
+    back.addEventListener('click', () => {
+      this.stopCapture();
+      this.back();
+    });
+    row.append(reset, back);
+    this.panel.append(row);
+  }
+
+  private bindingsChanged() {
+    saveBindings(this.bindings);
+    this.h.settingsChanged(this.settings);
+    this.render();
+  }
+
+  private stopCapture() {
+    this.capture?.stop();
+    this.capture = null;
+  }
+
+  /** Wait for a key for `action` (in the capture phase, so nothing else sees it). */
+  private captureKey(action: KeyAction, slot: number) {
+    this.stopCapture();
+    const onKey = (e: KeyboardEvent) => {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      if (e.repeat) return;
+      this.stopCapture();
+      if (e.code === 'Escape') {
+        this.controlsNote = '';
+      } else if (e.code === 'Backspace' || e.code === 'Delete') {
+        unbindKey(this.bindings, action, slot);
+        this.controlsNote = '';
+      } else {
+        const taken = bindKey(this.bindings, action, slot, e.code);
+        const label = (id: KeyAction) => KEY_ACTIONS.find((a) => a.id === id)!.label;
+        this.controlsNote = taken
+          ? `${keyName(e.code)} was on ${label(taken)}; it's moved to ${label(action)}.` +
+            (this.bindings.keys[taken].length ? '' : ` ${label(taken)} has no key now.`)
+          : '';
+      }
+      this.bindingsChanged();
+    };
+    window.addEventListener('keydown', onKey, { capture: true });
+    this.capture = { label: `key:${action}:${slot}`, stop: () => window.removeEventListener('keydown', onKey, { capture: true }) };
+    this.render();
+  }
+
+  /** Poll the controller until something new is pressed or pushed; Esc on the keyboard cancels. */
+  private capturePad(label: string, found: (pad: Gamepad, base: { buttons: number[]; axes: number[] }) => boolean) {
+    this.stopCapture();
+    let raf = 0;
+    let base: { buttons: number[]; axes: number[] } | null = null;
+    const poll = () => {
+      raf = requestAnimationFrame(poll);
+      const pad = activePad();
+      if (!pad) return;
+      // Whatever is held when we start doesn't count.
+      if (!base) {
+        base = { buttons: pad.buttons.map((x) => x.value), axes: [...pad.axes] };
+        return;
+      }
+      if (found(pad, base)) {
+        this.stopCapture();
+        this.controlsNote = '';
+        this.bindingsChanged();
+      }
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.code !== 'Escape') return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      this.stopCapture();
+      this.render();
+    };
+    raf = requestAnimationFrame(poll);
+    window.addEventListener('keydown', onKey, { capture: true });
+    this.capture = {
+      label,
+      stop: () => {
+        cancelAnimationFrame(raf);
+        window.removeEventListener('keydown', onKey, { capture: true });
+      },
+    };
+    this.render();
+  }
+
+  private capturePadButton(action: PadButton) {
+    this.capturePad(`button:${action}`, (pad, base) => {
+      const i = pad.buttons.findIndex((x, n) => x.value > 0.6 && base.buttons[n] < 0.3);
+      if (i < 0) return false;
+      bindPadButton(this.bindings, action, i);
+      return true;
+    });
+  }
+
+  private capturePadAnalog(action: PadAnalog, twoWay: boolean) {
+    this.capturePad(`analog:${action}`, (pad, base) => {
+      const axis = pad.axes.findIndex((v, n) => Math.abs(v) > 0.6 && Math.abs(v - base.axes[n]) > 0.5);
+      if (axis >= 0) {
+        // The direction they pushed is the positive one (forward, right, more throttle).
+        this.bindings.pad.analog[action] = { kind: 'axis', index: axis, invert: pad.axes[axis] < 0 };
+        return true;
+      }
+      if (twoWay) return false;
+      const i = pad.buttons.findIndex((x, n) => x.value > 0.6 && base.buttons[n] < 0.3);
+      if (i < 0) return false;
+      this.bindings.pad.analog[action] = { kind: 'button', index: i };
+      return true;
+    });
+  }
+
   /** A row of options; Left/Right also step through them when focused. */
   private segmented<T extends string | number>(
     label: string, values: T[], current: T, onPick: (v: T) => void, text: (v: T) => string = (v) => String(v),
@@ -477,6 +868,7 @@ export class Menu {
   private set(patch: Partial<Settings>, rerender = true) {
     Object.assign(this.settings, patch);
     saveSettings(this.settings);
+    if (this.lobby.room && ('colour' in patch || 'bike' in patch || 'playerName' in patch)) this.lobby.updateMe(this.me());
     this.h.settingsChanged(this.settings);
     if (rerender) {
       const focused = document.activeElement as HTMLElement | null;
@@ -514,4 +906,12 @@ export class Menu {
       options[Math.max(0, Math.min(options.length - 1, j + (e.code === 'ArrowRight' ? 1 : -1)))]?.click();
     }
   }
+}
+
+function shortBike(id: BikeId) {
+  return BIKES[id].name.replace('cc ', ' ').replace('two-stroke', '2T').replace('four-stroke', '4T');
+}
+
+function escapeHtml(text: string) {
+  return text.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 }
