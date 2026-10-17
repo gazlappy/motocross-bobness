@@ -95,15 +95,50 @@ const hud = {
   rpm: document.getElementById('rpm-fill')!,
   help: document.getElementById('help')!,
   banner: document.getElementById('banner')!,
+  score: document.getElementById('score-val')!,
+  trick: document.getElementById('trick')!,
 };
+
+let trickHoldUntil = 0;
+let trickShown = '';
+function showTrick(html: string, banked: boolean, holdMs = 0) {
+  if (html === trickShown && !holdMs) return;
+  trickShown = html;
+  hud.trick.innerHTML = html;
+  hud.trick.classList.toggle('banked', banked);
+  hud.trick.classList.toggle('show', html !== '');
+  trickHoldUntil = holdMs ? performance.now() + holdMs : 0;
+}
+player.stunts.onTrick = (name, points) => {
+  if (performance.now() < trickHoldUntil) return;
+  showTrick(name ? `${name}<b>${Math.round(points).toLocaleString()}</b>` : '', false);
+};
+player.stunts.onBank = (points, label) => {
+  sound.score();
+  showTrick(`${label}<b>+${points.toLocaleString()}</b>`, true, 2200);
+  hud.score.textContent = player.stunts.total.toLocaleString();
+};
+
+let bannerTimer = 0;
+function flashBanner(html: string, ms: number) {
+  hud.banner.innerHTML = html;
+  hud.banner.classList.add('show');
+  clearTimeout(bannerTimer);
+  bannerTimer = window.setTimeout(() => hud.banner.classList.remove('show'), ms);
+}
 document.getElementById('loading')!.remove();
 
 player.onCrash = (cause) => {
   sound.impact(1);
+  clearTimeout(bannerTimer);
   hud.banner.innerHTML = `WIPEOUT!<small>${cause}</small>`;
   hud.banner.classList.add('show');
 };
 player.onRespawn = () => hud.banner.classList.remove('show');
+player.onCannon = () => {
+  sound.cannon();
+  flashBanner('KA-BOOM!<small>out of bounds</small>', 1800);
+};
 player.onImpact = (s) => sound.impact(s * 0.7);
 
 function addRocks() {

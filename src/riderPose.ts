@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type { Bike } from './bike.ts';
 import { RIDER_POINTS } from './rider.ts';
+import type { StuntState } from './stunts.ts';
 
 /**
  * The rider's skeleton as world-space joint positions plus head orientation. Riding, the pose comes
@@ -94,6 +95,31 @@ function clampReach(from: THREE.Vector3, to: THREE.Vector3, reach: number) {
 }
 const _side = new THREE.Vector3();
 const _mounts = createMounts();
+const _hintL = new THREE.Vector3();
+const _hintR = new THREE.Vector3();
+const _hipC = new THREE.Vector3();
+const _shC = new THREE.Vector3();
+const _across = new THREE.Vector3();
+const _spine = new THREE.Vector3();
+
+/** Blend the bike-space riding pose towards a stunt's pose, keeping the rider's proportions. */
+function applyStunt(pose: RiderPose, body: RiderProportions, { def, weight: w }: StuntState) {
+  if (!def) return;
+  _across.subVectors(pose.hipR, pose.hipL).normalize();
+  _hipC.addVectors(pose.hipL, pose.hipR).multiplyScalar(0.5).lerp(def.hip, w);
+  _shC.addVectors(pose.shoulderL, pose.shoulderR).multiplyScalar(0.5).lerp(def.shoulder, w);
+  _spine.subVectors(_shC, _hipC).normalize();
+  _shC.copy(_hipC).addScaledVector(_spine, body.torso);
+  pose.hipL.copy(_hipC).addScaledVector(_across, -body.halfHips);
+  pose.hipR.copy(_hipC).addScaledVector(_across, body.halfHips);
+  pose.shoulderL.copy(_shC).addScaledVector(_across, -body.halfShoulders);
+  pose.shoulderR.copy(_shC).addScaledVector(_across, body.halfShoulders);
+  pose.head.copy(_shC).addScaledVector(_spine, body.neck);
+  pose.footL.lerp(def.footL, w);
+  pose.footR.lerp(def.footR, w);
+  if (def.handL) pose.handL.lerp(def.handL, w);
+  if (def.handR) pose.handR.lerp(def.handR, w);
+}
 
 /** Two-bone joint position: bones of length `l1` (from `a`) and `l2` (to `b`), bending towards `hint`. */
 function bend(a: THREE.Vector3, b: THREE.Vector3, l1: number, l2: number, hint: THREE.Vector3, out: THREE.Vector3) {
@@ -112,6 +138,7 @@ export function ridingPose(
   pose: RiderPose,
   body: RiderProportions = DEFAULT_PROPORTIONS,
   mounts: BikeMounts = placeholderMounts(bike.steerAngle, _mounts),
+  stunt: StuntState | null = null,
 ) {
   bike.rider.localPose(bike.body, _rPos, _rRot);
   const at = (p: THREE.Vector3, x: number, out: THREE.Vector3) =>
@@ -141,8 +168,16 @@ export function ridingPose(
   if (drop > 0) {
     for (const j of ['hipL', 'hipR', 'shoulderL', 'shoulderR', 'head'] as const) pose[j].y -= drop;
   }
-  bend(pose.hipL, pose.footL, body.thigh, body.shin, KNEE_HINT_L, pose.kneeL);
-  bend(pose.hipR, pose.footR, body.thigh, body.shin, KNEE_HINT_R, pose.kneeR);
+  let kneeHintL = KNEE_HINT_L, kneeHintR = KNEE_HINT_R;
+  if (stunt?.def && stunt.weight > 0) {
+    applyStunt(pose, body, stunt);
+    if (stunt.def.kneeHint) {
+      kneeHintL = _hintL.copy(KNEE_HINT_L).lerp(stunt.def.kneeHint, stunt.weight);
+      kneeHintR = _hintR.copy(KNEE_HINT_R).lerp(stunt.def.kneeHint, stunt.weight);
+    }
+  }
+  bend(pose.hipL, pose.footL, body.thigh, body.shin, kneeHintL, pose.kneeL);
+  bend(pose.hipR, pose.footR, body.thigh, body.shin, kneeHintR, pose.kneeR);
   bend(pose.shoulderL, pose.handL, body.upperArm, body.foreArm, ELBOW_HINT_L, pose.elbowL);
   bend(pose.shoulderR, pose.handR, body.upperArm, body.foreArm, ELBOW_HINT_R, pose.elbowR);
   // Out of reach, the hand/foot stops at the end of the straightened limb.

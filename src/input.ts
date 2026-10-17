@@ -4,6 +4,18 @@ export interface Controls {
   steer: number; // -1 (left) .. 1 (right)
   leanForward: number; // -1 (back) .. 1 (forward)
   leanSide: number; // -1 (left) .. 1 (right)
+  /** Stunt button held: 0 none, 1 (Space / pad A) or 2 (Shift / pad X). */
+  stunt?: 0 | 1 | 2;
+  /** Direction picking the trick while a stunt button is held. */
+  stuntDir?: StuntDir;
+}
+
+export type StuntDir = 'none' | 'up' | 'down' | 'left' | 'right';
+
+function toDir(forward: number, side: number): StuntDir {
+  if (Math.abs(forward) < 0.4 && Math.abs(side) < 0.4) return 'none';
+  if (Math.abs(forward) >= Math.abs(side)) return forward > 0 ? 'up' : 'down';
+  return side > 0 ? 'right' : 'left';
 }
 
 type Action = 'reset' | 'camera' | 'shiftUp' | 'shiftDown' | 'toggleAuto' | 'help' | 'mute';
@@ -31,7 +43,7 @@ export class Input {
 
   constructor() {
     window.addEventListener('keydown', (e) => {
-      if (e.code.startsWith('Arrow') || e.code === 'Space') e.preventDefault();
+      if (e.code.startsWith('Arrow') || e.code === 'Space' || e.code.startsWith('Shift')) e.preventDefault();
       if (!e.repeat && KEY_ACTIONS[e.code]) this.pending.push(KEY_ACTIONS[e.code]);
       this.keys.add(e.code);
     });
@@ -73,6 +85,16 @@ export class Input {
         if (b.pressed && !this.padPrev[i] && PAD_ACTIONS[i]) this.pending.push(PAD_ACTIONS[i]);
         this.padPrev[i] = b.pressed;
       });
+      if (pad.buttons[0]?.pressed) c.stunt = 1;
+      else if (pad.buttons[2]?.pressed) c.stunt = 2;
+    }
+
+    // Holding a stunt button turns the lean controls into the trick selector, as in the original.
+    if (!c.stunt) c.stunt = this.down('Space') ? 1 : this.down('ShiftLeft', 'ShiftRight') ? 2 : 0;
+    if (c.stunt) {
+      c.stuntDir = toDir(c.leanForward, c.leanSide);
+      c.leanForward = 0;
+      c.leanSide = 0;
     }
     return c;
   }

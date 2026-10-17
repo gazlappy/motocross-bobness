@@ -13,6 +13,11 @@ npm run sim        # headless physics checks (standing still, cruising, turning,
 Controls: **W** throttle, **S** brake, **A/D** steer, **↑/↓** lean forward/back, **←/→** lean sideways,
 **Q/E** shift (switches to manual), **M** auto/manual, **C** camera (chase/far/helmet/thrill), **R** reset (or skip a wipeout), **N** mute. Gamepad supported.
 
+Stunts (in the air): hold **Space** or **Shift** and pick the trick with the arrows (pad: A/X + right stick).
+Space: Superman, ↑ Cliffhanger, ↓ Heel Clicker, ←/→ Nac Nac. Shift: Double Can Can, ↑ Bar Hop, ↓ Splits,
+←/→ Saran Wrap. Hold a trick fully out to score; tuck back in before landing or it's a wipeout. Air time and
+flips add bonus points. Ride off the edge of the map and the out-of-bounds cannon fires you back across it.
+
 Crashes: land on your head, nose-dive, loop out, land flat from very high or get thrown off and the rider goes ragdoll; you respawn where you crashed once they stop tumbling.
 
 Stack: TypeScript, Vite, Three.js, Rapier (WASM physics).

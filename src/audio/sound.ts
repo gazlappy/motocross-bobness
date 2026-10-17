@@ -106,6 +106,62 @@ export class SoundSystem {
     bike.landingImpact = 0;
   }
 
+  /** The out-of-bounds cannon: a boom, then a cartoon slide whistle as you sail off. */
+  cannon() {
+    const ctx = this.ctx;
+    if (!ctx || !this.master) return;
+    this.impact(1);
+    const t = ctx.currentTime;
+    const boom = ctx.createOscillator();
+    boom.frequency.setValueAtTime(90, t);
+    boom.frequency.exponentialRampToValueAtTime(28, t + 0.5);
+    const bg = ctx.createGain();
+    bg.gain.setValueAtTime(1, t);
+    bg.gain.exponentialRampToValueAtTime(0.001, t + 0.6);
+    boom.connect(bg).connect(this.master);
+    boom.start(t);
+    boom.stop(t + 0.65);
+
+    const whistle = ctx.createOscillator();
+    whistle.type = 'triangle';
+    whistle.frequency.setValueAtTime(420, t + 0.15);
+    whistle.frequency.exponentialRampToValueAtTime(1900, t + 1.4);
+    const vib = ctx.createOscillator();
+    vib.frequency.value = 7;
+    const vibDepth = ctx.createGain();
+    vibDepth.gain.value = 25;
+    vib.connect(vibDepth).connect(whistle.frequency);
+    const wg = ctx.createGain();
+    wg.gain.setValueAtTime(0, t + 0.15);
+    wg.gain.linearRampToValueAtTime(0.25, t + 0.3);
+    wg.gain.setValueAtTime(0.25, t + 1.2);
+    wg.gain.exponentialRampToValueAtTime(0.001, t + 1.6);
+    whistle.connect(wg).connect(this.master);
+    whistle.start(t + 0.15);
+    vib.start(t + 0.15);
+    whistle.stop(t + 1.65);
+    vib.stop(t + 1.65);
+  }
+
+  /** A short bright chime when stunt points bank. */
+  score() {
+    const ctx = this.ctx;
+    if (!ctx || !this.master) return;
+    const t = ctx.currentTime;
+    for (const [i, f] of [880, 1320].entries()) {
+      const o = ctx.createOscillator();
+      o.type = 'square';
+      o.frequency.value = f;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.0001, t + i * 0.08);
+      g.gain.exponentialRampToValueAtTime(0.08, t + i * 0.08 + 0.01);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + i * 0.08 + 0.18);
+      o.connect(g).connect(this.master);
+      o.start(t + i * 0.08);
+      o.stop(t + i * 0.08 + 0.2);
+    }
+  }
+
   /** A short low thump for landings and crashes, 0..1. */
   impact(strength: number) {
     const ctx = this.ctx;

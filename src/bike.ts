@@ -122,6 +122,8 @@ export class Bike {
   /** While crashed the rider is a ragdoll and the bike is left to tumble. */
   crashed = false;
   readonly frame: RAPIER.Collider;
+  /** Set by the out-of-bounds cannon: the next landing's impact is forgiven. */
+  cannonLanding = false;
   lean = new THREE.Vector2(); // rider weight shift: x = side, y = forward
   private shiftCooldown = 0;
   private leanTarget = 0;
@@ -192,6 +194,9 @@ export class Bike {
     this.leanTarget = 0;
     this.crashed = false;
     this.crashCause = null;
+    this.cannonLanding = false;
+    this.body.setGravityScale(1, true);
+    this.rider.body.setGravityScale(1, true);
     this.rider.setActive(true);
     this.rider.snapTo(this.body);
     for (const w of this.wheels) w.grounded = false;
@@ -353,9 +358,9 @@ export class Bike {
     this.grounded = groundedCount > 0;
     this.airTime = this.grounded ? 0 : this.airTime + dt;
 
-    // Aero drag.
+    // Aero drag (none in the cannon's cartoon flight, or it would fall short).
     const v2 = _linv.lengthSq();
-    if (v2 > 0.01) {
+    if (v2 > 0.01 && !this.cannonLanding) {
       const drag = 0.5 * 1.2 * DRAG_CDA * v2 * dt;
       body.applyImpulse(toR(_imp.copy(_linv).normalize().multiplyScalar(-drag)), true);
     }
@@ -372,7 +377,7 @@ export class Bike {
     const impact = -_linv.dot(n); // the bike's own speed into the ground, ignoring how it's rotating
     const pitch = Math.asin(THREE.MathUtils.clamp(_fwd.dot(n), -1, 1)); // + nose up
     const roll = Math.asin(THREE.MathUtils.clamp(_right.dot(n), -1, 1));
-    if (impact > CRASH_IMPACT) this.crash('cased it');
+    if (impact > CRASH_IMPACT && !this.cannonLanding) this.crash('cased it');
     else if (w.steered && pitch < -CRASH_NOSE_DOWN) this.crash('over the bars');
     else if (!w.steered && pitch > CRASH_LOOPED) this.crash('looped out');
     else if (Math.abs(roll) > CRASH_LANDING_ROLL) this.crash('landed sideways');
