@@ -29,6 +29,23 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #9cc4e4; fon
 }
 #banner.show { opacity: 1; transform: translate(-50%, -50%) scale(1); }
 #banner small { display: block; font-size: 0.32em; color: var(--hud-fg); font-style: normal; letter-spacing: 0.08em; }
+#race {
+  position: fixed; left: 50%; top: 14px; transform: translateX(-50%); padding: 6px 16px; border-radius: 6px;
+  background: var(--hud-bg); color: var(--hud-fg); font-size: 17px; letter-spacing: 0.06em; white-space: nowrap;
+}
+#race b { color: var(--accent); font-size: 1.15em; }
+#results {
+  position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); padding: 18px 26px; border-radius: 10px;
+  background: rgba(20, 14, 10, 0.88); color: var(--hud-fg); min-width: min(420px, calc(100vw - 32px));
+  max-width: calc(100vw - 32px); box-sizing: border-box; text-align: center;
+}
+#results h2 { margin: 0 0 10px; color: var(--accent); font-style: italic; letter-spacing: 0.08em; }
+#results table { width: 100%; border-collapse: collapse; font-size: 15px; }
+#results th { font-size: 12px; opacity: 0.7; text-align: left; padding: 2px 6px; }
+#results td { padding: 4px 6px; text-align: left; border-top: 1px solid rgba(255, 255, 255, 0.08); }
+#results tr.me td { color: var(--accent); font-weight: bold; }
+#results p { margin: 12px 0 0; font-size: 14px; }
+#results b { color: var(--accent); }
 #score {
   position: fixed; right: 20px; top: 16px; padding: 6px 14px; border-radius: 6px;
   background: var(--hud-bg); color: var(--hud-fg); font-size: 15px; letter-spacing: 0.1em; font-weight: bold;

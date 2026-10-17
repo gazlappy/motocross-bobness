@@ -5,6 +5,8 @@ import type { Controls } from './input.ts';
 import { type Heightmap, sampleHeight } from './heightmap.ts';
 import { Ragdoll } from './ragdoll.ts';
 import { StuntSystem } from './stunts.ts';
+import type { Track } from './track.ts';
+import { jumpProfile } from './heightmap.ts';
 import { type BikeMounts, DEFAULT_PROPORTIONS, type RiderProportions, createPose, ridingPose } from './riderPose.ts';
 
 // The player's bike and rider, including wipeouts: on a crash the rider becomes a ragdoll, the bike
@@ -24,6 +26,39 @@ const CANNON_LANDING_RADIUS = 90; // m around the map centre
 
 const vec = (v: { x: number; y: number; z: number }) => new THREE.Vector3(v.x, v.y, v.z);
 
+/** Collision and contact-force events from one physics step, shared by every player in the world. */
+export interface PhysicsEvents {
+  collisions: [number, number, boolean][];
+  forces: { h1: number; h2: number; magnitude: number }[];
+}
+
+export function drainEvents(queue: RAPIER.EventQueue): PhysicsEvents {
+  const events: PhysicsEvents = { collisions: [], forces: [] };
+  queue.drainCollisionEvents((h1, h2, started) => events.collisions.push([h1, h2, started]));
+  queue.drainContactForceEvents((e) =>
+    events.forces.push({ h1: e.collider1(), h2: e.collider2(), magnitude: e.totalForceMagnitude() }),
+  );
+  return events;
+}
+
+const RUN_UP = 40; // m of flat track wanted before the next jump after a respawn
+
+/** Back up from `s` to flat track with a run-up to the next jump, so a respawn isn't a trap. */
+function safeRestart(track: Track, s: number) {
+  const L = track.length;
+  const flat = (x: number) => jumpProfile((((x % L) + L) % L)) < 0.05;
+  let at = s - 4;
+  for (let back = 0; back < 200; back++, at--) {
+    let clear = true;
+    for (let d = -6; d <= RUN_UP && clear; d += 2) clear = flat(at + d);
+    if (clear) return at;
+  }
+  // No long flat stretch nearby: settle for just being off the jumps.
+  at = s - 4;
+  for (let back = 0; back < 120 && !flat(at); back++) at--;
+  return at;
+}
+
 export class Player {
   readonly bike: Bike;
   ragdoll: Ragdoll | null = null;
@@ -38,10 +73,16 @@ export class Player {
   /** Ragdoll or bike slamming into something, 0..1. */
   onImpact?: (strength: number) => void;
   onCannon?: () => void;
+  /** When set (racing), respawns and the cannon put you back on the track. */
+  track: Track | null = null;
+  /** Preferred distance left of the track centreline when put back on it. */
+  lane = 0;
 
   private world: RAPIER.World;
   private hm: Heightmap;
   private spawn: THREE.Vector3;
+  private spawnYaw: number;
+  private lastControls: Controls | null = null;
   private events = new RAPIER.EventQueue(true);
   private crashTime = 0;
   private settledTime = 0;
@@ -57,6 +98,7 @@ export class Player {
     this.world = world;
     this.hm = hm;
     this.spawn = spawn.clone();
+    this.spawnYaw = yaw;
     this.bike = new Bike(world, spawn, yaw);
   }
 
@@ -69,14 +111,35 @@ export class Player {
     return this.ragdoll?.centre ?? null;
   }
 
+  /** Step a world containing only this player. With several players, use Sim instead. */
   physicsStep(c: Controls, dt: number) {
-    this.clock += dt;
-    this.bike.step(c, dt);
+    this.beforeStep(c, dt);
     this.world.step(this.events);
-    this.handleEvents();
-    this.stunts.step(c, this.bike, dt);
+    this.afterStep(dt, drainEvents(this.events));
+  }
+
+  /** Before the world steps: ride the bike. */
+  beforeStep(c: Controls, dt: number) {
+    this.clock += dt;
+    this.lastControls = c;
+    this.bike.step(c, dt);
+  }
+
+  /** After the world steps: react to what happened. */
+  afterStep(dt: number, events: PhysicsEvents) {
+    this.handleEvents(events);
+    if (this.lastControls) this.stunts.step(this.lastControls, this.bike, dt);
     if (this.bike.crashCause && !this.crashed) this.startCrash(this.bike.crashCause);
     this.updateCannon(dt);
+  }
+
+  /** Respawn position and heading: the given spot, or the nearest bit of track while racing. */
+  private placement(at: THREE.Vector3, yaw: number): [THREE.Vector3, number] {
+    const hit = this.track?.nearest(at.x, at.z, 400);
+    if (!this.track || !hit) return [at, yaw];
+    const p = this.track.sample(safeRestart(this.track, hit.s));
+    const lane = THREE.MathUtils.clamp(this.lane, -4, 4);
+    return [new THREE.Vector3(p.x + p.tz * lane, at.y, p.z - p.tx * lane), Math.atan2(-p.tx, -p.tz)];
   }
 
   private updateCannon(dt: number) {
@@ -98,9 +161,17 @@ export class Player {
 
   /** Launch whatever is out of bounds on a ballistic arc to a spot near the middle of the map. */
   private fireCannon(from: THREE.Vector3) {
-    const angle = Math.random() * Math.PI * 2;
-    const r = Math.sqrt(Math.random()) * CANNON_LANDING_RADIUS;
-    const target = new THREE.Vector3(Math.cos(angle) * r, 0, Math.sin(angle) * r);
+    let target: THREE.Vector3;
+    if (this.track) {
+      // Racing: drop back onto the track just ahead of where you left it.
+      const hit = this.track.nearest(from.x, from.z, 400);
+      const p = this.track.sample(hit ? hit.s + 15 : Math.random() * this.track.length);
+      target = new THREE.Vector3(p.x, 0, p.z);
+    } else {
+      const angle = Math.random() * Math.PI * 2;
+      const r = Math.sqrt(Math.random()) * CANNON_LANDING_RADIUS;
+      target = new THREE.Vector3(Math.cos(angle) * r, 0, Math.sin(angle) * r);
+    }
     target.y = sampleHeight(this.hm, target.x, target.z) + 1;
 
     const g = 9.81 * CANNON_GRAVITY;
@@ -132,24 +203,24 @@ export class Player {
     this.onCannon?.();
   }
 
-  private handleEvents() {
+  private handleEvents(events: PhysicsEvents) {
     const bike = this.bike;
     const riderHandles = bike.rider.colliders.map((c) => c.handle);
-    this.events.drainCollisionEvents((h1, h2, started) => {
-      if (!started || this.crashed) return;
+    for (const [h1, h2, started] of events.collisions) {
+      if (!started || this.crashed) continue;
       if (riderHandles.includes(h1) || riderHandles.includes(h2)) bike.crash('hit the dirt');
       else if (h1 === bike.frame.handle || h2 === bike.frame.handle) {
         const r = bike.body.rotation();
         const upY = 1 - 2 * (r.x * r.x + r.z * r.z);
         if (upY < 0.3) bike.crash('landed on its back');
       }
-    });
-    this.events.drainContactForceEvents((e) => {
-      if (!this.ragdoll || this.clock - this.lastImpact < 0.08) return;
-      if (!this.ragdoll.ownsCollider(e.collider1()) && !this.ragdoll.ownsCollider(e.collider2())) return;
+    }
+    for (const f of events.forces) {
+      if (!this.ragdoll || this.clock - this.lastImpact < 0.08) break;
+      if (!this.ragdoll.ownsCollider(f.h1) && !this.ragdoll.ownsCollider(f.h2)) continue;
       this.lastImpact = this.clock;
-      this.onImpact?.(Math.min(1, e.totalForceMagnitude() / 8000));
-    });
+      this.onImpact?.(Math.min(1, f.magnitude / 8000));
+    }
   }
 
   private startCrash(cause: string) {
@@ -213,10 +284,13 @@ export class Player {
   reset(toSpawn = false) {
     if (this.crashed) return this.respawn();
     const t = this.bike.body.translation();
-    this.placeBike(toSpawn ? this.spawn : new THREE.Vector3(t.x, t.y, t.z), toSpawn ? 0 : this.bike.yaw);
+    if (toSpawn) this.placeBike(this.spawn, this.spawnYaw, false);
+    else this.placeBike(new THREE.Vector3(t.x, t.y, t.z), this.bike.yaw);
   }
 
-  private placeBike(at: THREE.Vector3, yaw: number) {
+  /** Put the bike back down at a spot (snapped onto the track while racing, unless `snap` is off). */
+  placeBike(at: THREE.Vector3, yaw: number, snap = true) {
+    if (snap) [at, yaw] = this.placement(at, yaw);
     // A reset ends the jump: whatever was mid-air doesn't score.
     this.stunts.reset();
     // Respawning out of bounds would just fire the cannon again.

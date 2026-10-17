@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import RAPIER from '@dimforge/rapier3d-compat';
 import { Noise2D } from './noise.ts';
 import { type Heightmap, rapierHeights } from './heightmap.ts';
+import { TRACK_HALF_WIDTH } from './track.ts';
 
 const SAND = new THREE.Color(0xc9a46c);
 const DIRT = new THREE.Color(0x8a5f3a);
@@ -66,7 +67,8 @@ export function createTerrainMesh(hm: Heightmap) {
       const grassy = THREE.MathUtils.smoothstep(patch.fbm(x / 60, z / 60, 3), 0.05, 0.35);
       c.lerp(GRASS, grassy * 0.8);
       c.lerp(DIRT, THREE.MathUtils.smoothstep(patch.fbm(x / 25 + 5, z / 25, 2), 0.1, 0.5) * 0.6);
-      if (Math.abs(x) < 9 && z < 34 && z > -264) c.lerp(TRACK, 0.85);
+      // Worked dirt on the racing surface, fading out over the shoulders.
+      c.lerp(TRACK, 0.85 * (1 - THREE.MathUtils.smoothstep(hm.trackDistance[i], TRACK_HALF_WIDTH, TRACK_HALF_WIDTH + 3)));
       c.lerp(ROCK, THREE.MathUtils.smoothstep(slope, 0.55, 1.1));
       colors.set([c.r, c.g, c.b], i * 3);
     }

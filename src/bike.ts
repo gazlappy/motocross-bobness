@@ -24,6 +24,11 @@ const PROBE_RADIUS = 0.06;
 const WHEELBASE = 1.48;
 const IDENTITY = { x: 0, y: 0, z: 0, w: 1 };
 const PROBE_GROUPS = groups(GROUP_PROBE, GROUP_WORLD);
+// Wheels probe straight down: probing along the bike's own axis would lose the ground as soon
+// as the bike leans hard into a turn.
+const DOWN = { x: 0, y: -1, z: 0 };
+const TYRE_CROWN = 0.07; // m, radius of the tyre's cross-section
+const _side = new THREE.Vector3();
 
 const GEARS = [2.9, 2.1, 1.62, 1.3, 1.08];
 const FINAL_DRIVE = 10;
@@ -49,6 +54,7 @@ const CRASH_NOSE_DOWN = 0.8; // rad, front wheel landing that steep goes over th
 const CRASH_LOOPED = 1.15; // rad, landing on the rear wheel that far past vertical-ish
 const CRASH_LANDING_ROLL = 1.05; // rad, landing leaned over this far
 const CRASH_STRETCH = 0.42; // m, rider ripped off the pegs
+const LANDING_MIN_AIR = 0.3; // s: shorter hops over bumps aren't judged as landings
 const MAX_LEAN = Math.atan(0.95 * TYRE_MU); // steepest lean the tyres can hold
 
 function torqueAt(rpm: number) {
@@ -152,7 +158,7 @@ export class Bike {
         .setDensity(0)
         .setFriction(0.6)
         .setRestitution(0.2)
-        .setCollisionGroups(groups(GROUP_BIKE, GROUP_WORLD | GROUP_RAGDOLL))
+        .setCollisionGroups(groups(GROUP_BIKE, GROUP_WORLD | GROUP_RAGDOLL | GROUP_BIKE))
         .setActiveEvents(RAPIER.ActiveEvents.COLLISION_EVENTS),
       this.body,
     );
@@ -268,11 +274,23 @@ export class Bike {
       const maxLen = SUSP_TRAVEL + WHEEL_RADIUS;
       // A thin sphere sweep rather than a ray: rays running exactly along heightfield edges can miss.
       const hit = this.world.castShape(
-        toR(origin), IDENTITY, { x: -_up.x, y: -_up.y, z: -_up.z }, this.probe,
-        0, maxLen - PROBE_RADIUS, true, undefined, PROBE_GROUPS, undefined, body,
+        toR(origin), IDENTITY, DOWN, this.probe,
+        0, maxLen + 0.3 - PROBE_RADIUS, true, undefined, PROBE_GROUPS, undefined, body,
       );
 
-      if (!hit) {
+      // Round-profile tyre: leaned over, the contact patch rolls onto the tyre's side, so the wheel
+      // centre sits (R - r)cos(lean) + r above the ground and the patch moves out sideways.
+      let compression = -1;
+      let cosLean = 1;
+      if (hit) {
+        w.surfaceNormal.set(hit.normal1.x, hit.normal1.y, hit.normal1.z);
+        const height = (hit.time_of_impact + PROBE_RADIUS) * w.surfaceNormal.y; // attach point above the ground plane
+        cosLean = THREE.MathUtils.clamp(_up.dot(w.surfaceNormal), 0.25, 1);
+        const centreToGround = (WHEEL_RADIUS - TYRE_CROWN) * cosLean + TYRE_CROWN;
+        compression = SUSP_TRAVEL - (height - centreToGround) / cosLean;
+      }
+
+      if (!hit || compression < 0) {
         w.grounded = false;
         w.compression = 0;
         w.rayLength += (maxLen - w.rayLength) * Math.min(1, dt * 20);
@@ -284,18 +302,15 @@ export class Bike {
       groundedCount++;
       const touchdown = !w.grounded;
       w.grounded = true;
-      const dist = hit.time_of_impact + PROBE_RADIUS;
-      w.rayLength = dist;
-      w.surfaceNormal.set(hit.normal1.x, hit.normal1.y, hit.normal1.z);
-      const compression = maxLen - dist;
+      w.rayLength = maxLen - compression; // attach point to wheel bottom, along the bike's axis
       // Compression rate: how fast the attach point closes on the ground surface. Measuring along the
       // bike's own axis instead would read forward speed as extension whenever the bike is pitched.
       _v.subVectors(origin, _com);
       _v.crossVectors(_angv, _v).add(_linv);
-      const compVel = -_v.dot(w.surfaceNormal) / Math.max(0.3, _up.dot(w.surfaceNormal));
+      const compVel = -_v.dot(w.surfaceNormal) / cosLean;
       if (touchdown) {
         this.landingImpact = Math.max(this.landingImpact, compVel);
-        this.checkLanding(w);
+        if (this.airTime > LANDING_MIN_AIR) this.checkLanding(w);
       }
       w.compression = compression;
 
@@ -309,7 +324,12 @@ export class Bike {
       const dampF = compVel * damp;
       const load = Math.max(0, springF + dampF);
 
-      const contact = origin.addScaledVector(_up, -dist);
+      // Contact patch: down the bike's axis to the wheel centre, then to the low side of the tyre.
+      _side.copy(w.surfaceNormal).negate().addScaledVector(_right, w.surfaceNormal.dot(_right)).normalize();
+      const contact = origin
+        .addScaledVector(_up, -(SUSP_TRAVEL - compression))
+        .addScaledVector(_side, WHEEL_RADIUS - TYRE_CROWN)
+        .addScaledVector(w.surfaceNormal, -TYRE_CROWN);
       // The ground pushes along its normal; pushing along the bike's tilted axis would act as thrust.
       body.applyImpulseAtPoint(toR(_imp.copy(w.surfaceNormal).multiplyScalar(load * dt)), toR(contact), true);
 
@@ -446,6 +466,9 @@ export class Bike {
       this.leanTarget += THREE.MathUtils.clamp(desired - this.leanTarget, -LEAN_RATE * dt, LEAN_RATE * dt);
       const target = this.leanTarget;
       torque.addScaledVector(_fwd, INERTIA.z * (LEAN_KP * (target - roll) - LEAN_KD * rollRate));
+      // A firm stop past the tyres' limit: the rider won't let it fold over.
+      const over = Math.abs(roll) - MAX_LEAN - 0.05;
+      if (over > 0) torque.addScaledVector(_fwd, -Math.sign(roll) * INERTIA.z * 400 * over);
       // Wheelie control: past a point the rider pulls the nose back down, unless leaning back for it.
       const nose = this.wheelieAngle;
       const limit = 0.12 + 0.32 * Math.max(0, -this.lean.y) - 0.06 * Math.max(0, this.lean.y);
@@ -457,6 +480,15 @@ export class Bike {
       torque.addScaledVector(_right, INERTIA.x * (-5 * this.lean.y + gyro - 1.2 * pitchRate));
       torque.addScaledVector(_fwd, INERTIA.z * (5 * this.lean.x - 3 * roll - 2 * rollRate));
       torque.addScaledVector(_up, -INERTIA.y * 2.5 * c.steer);
+      // Spinning wheels and the rider keep the bike pointing where it's going: damp yaw, and turn the
+      // nose gently towards the direction of travel.
+      const yawRate = _angv.dot(_up);
+      torque.addScaledVector(_up, -INERTIA.y * 3 * yawRate);
+      const fx = _fwd.x, fz = _fwd.z, vx = _linv.x, vz = _linv.z;
+      if (vx * vx + vz * vz > 25 && fx * fx + fz * fz > 0.1) {
+        const off = Math.atan2(fz * vx - fx * vz, fx * vx + fz * vz); // + = travelling to the left of the nose
+        torque.addScaledVector(_up, INERTIA.y * 2.5 * off);
+      }
       // A gentle pull that lines the bike up with its flight path, like a rider instinctively would.
       if (v2 > 25) {
         const align = _v.crossVectors(_fwd, _linv).divideScalar(Math.sqrt(v2)).dot(_right);

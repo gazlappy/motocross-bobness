@@ -7,11 +7,18 @@ npm install
 npm run dev        # http://localhost:5173
 npm run build      # typecheck + static build into dist/
 npm run render:engine  # write engine-sound previews to audio-preview/*.wav
+npm run race       # headless 3-lap race between seven AI riders (lap times, crashes)
+npm run jump-speeds  # which approach speeds land each jump cleanly (tunes the AI)
 npm run sim        # headless physics checks (standing still, cruising, turning, weight shift, full run)
 ```
 
 Controls: **W** throttle, **S** brake, **A/D** steer, **↑/↓** lean forward/back, **←/→** lean sideways,
 **Q/E** shift (switches to manual), **M** auto/manual, **C** camera (chase/far/helmet/thrill), **R** reset (or skip a wipeout), **N** mute. Gamepad supported.
+
+The race: a 3-lap Nationals on a ~940 m loop (berms, rollers, tabletops, a step-up double and
+whoops) against six AI riders on the other bike colours. 3-2-1-GO from the grid, ordered
+checkpoints (no shortcuts), live position and lap timer, results at the finish (Enter to go again).
+Crashes put you back on the track with a run-up to the next jump.
 
 Stunts (in the air): hold **Space** or **Shift** and pick the trick with the arrows (pad: A/X + right stick).
 Space: Superman, ↑ Cliffhanger, ↓ Heel Clicker, ←/→ Nac Nac. Shift: Double Can Can, ↑ Bar Hop, ↓ Splits,

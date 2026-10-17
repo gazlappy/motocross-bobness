@@ -1,9 +1,28 @@
+import * as THREE from 'three';
 import workletUrl from './engineWorklet.ts?worker&url';
 import type { Bike } from '../bike.ts';
 import type { EngineParams } from './engineWorklet.ts';
 
 // Game audio: the procedural engine plus wind, tyre roll, skid and landing thuds built from noise.
 // Browsers only allow audio after a user gesture, so the graph is built on the first key/click.
+
+/** Another bike whose engine should be heard, placed by distance and direction from the camera. */
+export interface EngineSource {
+  position(): { x: number; y: number; z: number };
+  rpm(): number;
+  load(): number;
+}
+
+interface RemoteEngine {
+  src: EngineSource;
+  node?: AudioWorkletNode;
+  gain?: GainNode;
+  pan?: StereoPannerNode;
+}
+
+const _camPos = new THREE.Vector3();
+const _camRight = new THREE.Vector3();
+const _rel = new THREE.Vector3();
 
 export class SoundSystem {
   private ctx?: AudioContext;
@@ -15,6 +34,7 @@ export class SoundSystem {
   private skid?: { gain: GainNode; filter: BiquadFilterNode };
   private starting = false;
   private muted = false;
+  private remotes: RemoteEngine[] = [];
 
   constructor() {
     const start = () => void this.start();
@@ -74,14 +94,43 @@ export class SoundSystem {
     return { gain, filter };
   }
 
+  /** Hear another bike's engine (the AI riders). */
+  addEngine(src: EngineSource) {
+    this.remotes.push({ src });
+  }
+
+  private updateRemotes(listener: THREE.Camera) {
+    const ctx = this.ctx!;
+    listener.getWorldPosition(_camPos);
+    _camRight.set(1, 0, 0).applyQuaternion(listener.quaternion);
+    for (const r of this.remotes) {
+      if (!r.node) {
+        r.node = new AudioWorkletNode(ctx, 'engine', { outputChannelCount: [1] });
+        r.gain = ctx.createGain();
+        r.gain.gain.value = 0;
+        r.pan = ctx.createStereoPanner();
+        r.node.connect(r.gain).connect(r.pan).connect(this.master!);
+      }
+      const params: EngineParams = { rpm: r.src.rpm(), load: r.src.load() };
+      r.node.port.postMessage(params);
+      const p = r.src.position();
+      _rel.set(p.x - _camPos.x, p.y - _camPos.y, p.z - _camPos.z);
+      const dist = _rel.length();
+      const t = ctx.currentTime;
+      r.gain!.gain.setTargetAtTime(0.6 / (1 + (dist / 9) ** 2), t, 0.05);
+      r.pan!.pan.setTargetAtTime(dist > 0.1 ? THREE.MathUtils.clamp(_rel.dot(_camRight) / dist, -1, 1) * 0.85 : 0, t, 0.05);
+    }
+  }
+
   toggleMute() {
     this.muted = !this.muted;
     if (this.ctx && this.master) this.master.gain.setTargetAtTime(this.muted ? 0 : 0.9, this.ctx.currentTime, 0.05);
   }
 
-  update(bike: Bike) {
+  update(bike: Bike, listener?: THREE.Camera) {
     const ctx = this.ctx;
     if (!ctx || !this.engine) return;
+    if (listener) this.updateRemotes(listener);
     const now = ctx.currentTime;
     const params: EngineParams = { rpm: bike.rpm, load: bike.throttle };
     this.engine.port.postMessage(params);

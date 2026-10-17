@@ -1,5 +1,4 @@
 import * as THREE from 'three';
-import type { GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import type { RiderPose, RiderProportions } from './riderPose.ts';
 
 // The rigged "Low-poly Motocross Character" (see CREDITS.md), a Mixamo skeleton. Each frame its
@@ -36,9 +35,24 @@ export class GltfRiderModel {
   /** Hips bone position relative to the midpoint of the hip joints, in rider space at bind. */
   private hipsFromHipCentre = new THREE.Vector3();
 
-  constructor(gltf: GLTF) {
-    const model = gltf.scene;
+  /**
+   * @param model the rider's scene (clone it with SkeletonUtils for each extra rider)
+   * @param tint recolours the red parts of the kit, for team colours
+   */
+  constructor(model: THREE.Object3D, tint?: THREE.ColorRepresentation) {
+    const team = tint === undefined ? null : new THREE.Color(tint);
     model.traverse((o) => {
+      const mesh = o as THREE.Mesh;
+      if (team && mesh.isMesh) {
+        const recolour = (m: THREE.Material) => {
+          const c = (m as THREE.MeshStandardMaterial).color;
+          if (!c || !(c.r > 0.12 && c.r > 4 * Math.max(c.g, c.b))) return m; // the red parts of the kit
+          const copy = m.clone() as THREE.MeshStandardMaterial;
+          copy.color.copy(team);
+          return copy;
+        };
+        mesh.material = Array.isArray(mesh.material) ? mesh.material.map(recolour) : recolour(mesh.material);
+      }
       if ((o as THREE.SkinnedMesh).isSkinnedMesh || (o as THREE.Mesh).isMesh) {
         o.castShadow = true;
         o.frustumCulled = false; // skinned bounds are from the bind pose, not where the bones are
