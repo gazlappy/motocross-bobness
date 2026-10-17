@@ -16,3 +16,5 @@ Controls: **W** throttle, **S** brake, **A/D** steer, **↑/↓** lean forward/b
 Crashes: land on your head, nose-dive, loop out, land flat from very high or get thrown off and the rider goes ragdoll; you respawn where you crashed once they stop tumbling.
 
 Stack: TypeScript, Vite, Three.js, Rapier (WASM physics).
+
+Models: the bike and rider are free CC-BY models from Sketchfab (see [CREDITS.md](CREDITS.md)), in `assets/models/`. The bike file has 7 colours (red, orange, yellow, green, blue, white, black); pick one in `src/main.ts`. `node scripts/inspect-glb.ts <file.glb>` prints a model's parts and skeleton.

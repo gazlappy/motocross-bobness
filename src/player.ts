@@ -4,7 +4,7 @@ import { Bike } from './bike.ts';
 import type { Controls } from './input.ts';
 import { type Heightmap, sampleHeight } from './heightmap.ts';
 import { Ragdoll } from './ragdoll.ts';
-import { createPose, ridingPose } from './riderPose.ts';
+import { type BikeMounts, DEFAULT_PROPORTIONS, type RiderProportions, createPose, ridingPose } from './riderPose.ts';
 
 // The player's bike and rider, including wipeouts: on a crash the rider becomes a ragdoll, the bike
 // tumbles on its own, and once everything has settled the player is put back where they crashed.
@@ -19,6 +19,10 @@ export class Player {
   readonly bike: Bike;
   ragdoll: Ragdoll | null = null;
   readonly pose = createPose();
+  /** Body measurements of whichever rider model is shown. */
+  proportions: RiderProportions = DEFAULT_PROPORTIONS;
+  /** Grips and pegs of whichever bike model is shown (null: the placeholder's). */
+  mounts: ((steer: number) => BikeMounts) | null = null;
   onCrash?: (cause: string) => void;
   onRespawn?: () => void;
   /** Ragdoll or bike slamming into something, 0..1. */
@@ -81,7 +85,7 @@ export class Player {
 
   private startCrash(cause: string) {
     const bike = this.bike;
-    ridingPose(bike, this.pose);
+    this.ridingPose();
 
     // The ragdoll leaves with the rider body's momentum, spin included.
     const r = bike.rider.body;
@@ -119,7 +123,12 @@ export class Player {
     } else if (t.y < -50) {
       this.reset(true);
     }
-    return this.ragdoll ? this.ragdoll.readPose(this.pose) : ridingPose(this.bike, this.pose);
+    return this.ragdoll ? this.ragdoll.readPose(this.pose) : this.ridingPose();
+  }
+
+  private ridingPose() {
+    const mounts = this.mounts?.(this.bike.steerAngle);
+    return ridingPose(this.bike, this.pose, this.proportions, mounts);
   }
 
   /** Back on the bike where the crash happened, pointing the way they were going. */

@@ -5,6 +5,11 @@ import { createTerrainCollider, createTerrainMesh } from './terrain.ts';
 import { Player } from './player.ts';
 import { BikeModel } from './bikeModel.ts';
 import { RiderModel } from './riderModel.ts';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { GltfBikeModel } from './gltfBikeModel.ts';
+import { GltfRiderModel } from './gltfRiderModel.ts';
+import bikeUrl from '../assets/models/Bike/mid_poly_dirt_bike.glb?url';
+import riderUrl from '../assets/models/Rider/low-poly_motocross_character_rigged.glb?url';
 import { Input } from './input.ts';
 import { CameraRig } from './camera.ts';
 import { SoundSystem } from './audio/sound.ts';
@@ -19,7 +24,7 @@ const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.shadowMap.type = THREE.PCFShadowMap;
 document.getElementById('app')!.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
@@ -53,10 +58,32 @@ createTerrainCollider(world, hm);
 SPAWN.y = sampleHeight(hm, SPAWN.x, SPAWN.z) + 1.0;
 const player = new Player(world, hm, SPAWN, 0);
 const bike = player.bike;
-const model = new BikeModel();
-scene.add(model.root);
-const riderModel = new RiderModel();
-scene.add(riderModel.root);
+// The downloaded models, falling back to the box placeholders if either fails to load.
+const loader = new GLTFLoader();
+const [bikeGltf, riderGltf] = await Promise.all(
+  [bikeUrl, riderUrl].map((url) => loader.loadAsync(url).catch((e) => (console.warn(`model ${url} failed`, e), null))),
+);
+let model: BikeModel | GltfBikeModel = new BikeModel();
+let riderModel: RiderModel | GltfRiderModel = new RiderModel();
+try {
+  if (bikeGltf) {
+    const gltfBike = new GltfBikeModel(bikeGltf, 'red');
+    model = gltfBike;
+    player.mounts = () => gltfBike.mounts();
+  }
+} catch (e) {
+  console.warn('bike model unusable, using placeholder', e);
+}
+try {
+  if (riderGltf) {
+    const gltfRider = new GltfRiderModel(riderGltf);
+    riderModel = gltfRider;
+    player.proportions = gltfRider.proportions;
+  }
+} catch (e) {
+  console.warn('rider model unusable, using placeholder', e);
+}
+scene.add(model.root, riderModel.root);
 
 const input = new Input();
 const rig = new CameraRig(camera, hm);

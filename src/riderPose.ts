@@ -30,10 +30,51 @@ export function createPose(): RiderPose {
   return pose;
 }
 
-const HALF_HIPS = 0.11;
-const HALF_SHOULDERS = 0.19;
-const THIGH = 0.46;
-const UPPER_ARM = 0.32;
+/** Body measurements (metres) the pose is built with; a rider model supplies its own. */
+export interface RiderProportions {
+  thigh: number;
+  shin: number;
+  upperArm: number;
+  foreArm: number;
+  halfHips: number;
+  halfShoulders: number;
+  /** Hip centre to shoulder centre. */
+  torso: number;
+  /** Shoulder centre to the head joint. */
+  neck: number;
+}
+
+/** Where the rider holds and stands on the bike, in bike space. */
+export interface BikeMounts {
+  gripL: THREE.Vector3;
+  gripR: THREE.Vector3;
+  pegL: THREE.Vector3;
+  pegR: THREE.Vector3;
+}
+
+/** Grips and pegs of the placeholder box bike; grips swing with steering. */
+export function placeholderMounts(steer: number, out: BikeMounts) {
+  out.gripL.set(-0.36, 0.84, -0.48 + steer * 0.3);
+  out.gripR.set(0.36, 0.84, -0.48 - steer * 0.3);
+  out.pegL.set(-0.2, 0.2, 0);
+  out.pegR.set(0.2, 0.2, 0);
+  return out;
+}
+
+export function createMounts(): BikeMounts {
+  return { gripL: new THREE.Vector3(), gripR: new THREE.Vector3(), pegL: new THREE.Vector3(), pegR: new THREE.Vector3() };
+}
+
+/** Proportions of the placeholder box rider. */
+export const DEFAULT_PROPORTIONS: RiderProportions = {
+  thigh: 0.46, shin: 0.46, upperArm: 0.32, foreArm: 0.32,
+  halfHips: 0.11, halfShoulders: 0.19, torso: 0.55, neck: 0.2,
+};
+/** Ankle joint relative to the footpeg, bike space. */
+const ANKLE_ABOVE_PEG = new THREE.Vector3(0, 0.13, 0.04);
+/** Hip-to-ankle distance as a fraction of leg length: lower is a deeper crouch. */
+const STANCE = 0.84;
+const MAX_CROUCH = 0.12; // m
 const KNEE_HINT_L = new THREE.Vector3(-0.3, 0, -1);
 const KNEE_HINT_R = new THREE.Vector3(0.3, 0, -1);
 const ELBOW_HINT_L = new THREE.Vector3(-1, 0.2, 0.4);
@@ -44,38 +85,71 @@ const _rRot = new THREE.Quaternion();
 const _bPos = new THREE.Vector3();
 const _bRot = new THREE.Quaternion();
 const _ab = new THREE.Vector3();
-const _side = new THREE.Vector3();
+const _shoulder = new THREE.Vector3();
+const _head = new THREE.Vector3();
 
-/** Two-bone joint position: equal-length bones from `a` to `b`, bending towards `hint`. */
-function bend(a: THREE.Vector3, b: THREE.Vector3, bone: number, hint: THREE.Vector3, out: THREE.Vector3) {
+function clampReach(from: THREE.Vector3, to: THREE.Vector3, reach: number) {
+  const d = from.distanceTo(to);
+  if (d > reach) to.sub(from).multiplyScalar(reach / d).add(from);
+}
+const _side = new THREE.Vector3();
+const _mounts = createMounts();
+
+/** Two-bone joint position: bones of length `l1` (from `a`) and `l2` (to `b`), bending towards `hint`. */
+function bend(a: THREE.Vector3, b: THREE.Vector3, l1: number, l2: number, hint: THREE.Vector3, out: THREE.Vector3) {
   _ab.subVectors(b, a);
-  const half = _ab.length() / 2;
-  _side.copy(hint).addScaledVector(_ab, -hint.dot(_ab) / Math.max(1e-6, _ab.lengthSq())).normalize();
-  return out.addVectors(a, b).multiplyScalar(0.5).addScaledVector(_side, Math.sqrt(Math.max(0, bone * bone - half * half)));
+  const d = Math.min(_ab.length(), l1 + l2 - 1e-4);
+  const along = (d * d + l1 * l1 - l2 * l2) / (2 * d); // law of cosines: distance from a along a->b
+  const h = Math.sqrt(Math.max(0, l1 * l1 - along * along));
+  _ab.normalize();
+  _side.copy(hint).addScaledVector(_ab, -hint.dot(_ab)).normalize();
+  return out.copy(a).addScaledVector(_ab, along).addScaledVector(_side, h);
 }
 
 /** Pose of a rider on the bike: torso from the rider body, hands on the bars, feet on the pegs. */
-export function ridingPose(bike: Bike, pose: RiderPose) {
+export function ridingPose(
+  bike: Bike,
+  pose: RiderPose,
+  body: RiderProportions = DEFAULT_PROPORTIONS,
+  mounts: BikeMounts = placeholderMounts(bike.steerAngle, _mounts),
+) {
   bike.rider.localPose(bike.body, _rPos, _rRot);
   const at = (p: THREE.Vector3, x: number, out: THREE.Vector3) =>
     out.copy(p).setX(p.x + x).applyQuaternion(_rRot).add(_rPos);
 
-  // Everything is built in bike space, then moved to world space at the end.
-  at(RIDER_POINTS.hip, -HALF_HIPS, pose.hipL);
-  at(RIDER_POINTS.hip, HALF_HIPS, pose.hipR);
-  at(RIDER_POINTS.shoulder, -HALF_SHOULDERS, pose.shoulderL);
-  at(RIDER_POINTS.shoulder, HALF_SHOULDERS, pose.shoulderR);
-  at(RIDER_POINTS.head, 0, pose.head);
+  // Torso points follow the rider body's lean, spaced by this rider's own measurements.
+  _shoulder.subVectors(RIDER_POINTS.shoulder, RIDER_POINTS.hip).setLength(body.torso).add(RIDER_POINTS.hip);
+  _head.subVectors(RIDER_POINTS.head, RIDER_POINTS.shoulder).setLength(body.neck).add(_shoulder);
 
-  const steer = bike.steerAngle;
-  pose.handL.set(-0.36, 0.84, -0.48 + steer * 0.3);
-  pose.handR.set(0.36, 0.84, -0.48 - steer * 0.3);
-  pose.footL.set(-0.2, 0.2, 0);
-  pose.footR.set(0.2, 0.2, 0);
-  bend(pose.hipL, pose.footL, THIGH, KNEE_HINT_L, pose.kneeL);
-  bend(pose.hipR, pose.footR, THIGH, KNEE_HINT_R, pose.kneeR);
-  bend(pose.shoulderL, pose.handL, UPPER_ARM, ELBOW_HINT_L, pose.elbowL);
-  bend(pose.shoulderR, pose.handR, UPPER_ARM, ELBOW_HINT_R, pose.elbowR);
+  // Everything is built in bike space, then moved to world space at the end.
+  at(RIDER_POINTS.hip, -body.halfHips, pose.hipL);
+  at(RIDER_POINTS.hip, body.halfHips, pose.hipR);
+  at(_shoulder, -body.halfShoulders, pose.shoulderL);
+  at(_shoulder, body.halfShoulders, pose.shoulderR);
+  at(_head, 0, pose.head);
+
+  pose.handL.copy(mounts.gripL);
+  pose.handR.copy(mounts.gripR);
+  // The foot joint is the ankle: it sits above the peg, with the boot sole on it.
+  pose.footL.copy(mounts.pegL).add(ANKLE_ABOVE_PEG);
+  pose.footR.copy(mounts.pegR).add(ANKLE_ABOVE_PEG);
+
+  // Attack stance: sink the upper body until the knees bend, whatever this rider's leg length.
+  const hipToPeg = (pose.hipL.distanceTo(pose.footL) + pose.hipR.distanceTo(pose.footR)) / 2;
+  // Capped, so leaning back straightens the legs instead of sinking the hips into the seat.
+  const drop = Math.min(MAX_CROUCH, hipToPeg - STANCE * (body.thigh + body.shin));
+  if (drop > 0) {
+    for (const j of ['hipL', 'hipR', 'shoulderL', 'shoulderR', 'head'] as const) pose[j].y -= drop;
+  }
+  bend(pose.hipL, pose.footL, body.thigh, body.shin, KNEE_HINT_L, pose.kneeL);
+  bend(pose.hipR, pose.footR, body.thigh, body.shin, KNEE_HINT_R, pose.kneeR);
+  bend(pose.shoulderL, pose.handL, body.upperArm, body.foreArm, ELBOW_HINT_L, pose.elbowL);
+  bend(pose.shoulderR, pose.handR, body.upperArm, body.foreArm, ELBOW_HINT_R, pose.elbowR);
+  // Out of reach, the hand/foot stops at the end of the straightened limb.
+  clampReach(pose.shoulderL, pose.handL, body.upperArm + body.foreArm);
+  clampReach(pose.shoulderR, pose.handR, body.upperArm + body.foreArm);
+  clampReach(pose.hipL, pose.footL, body.thigh + body.shin);
+  clampReach(pose.hipR, pose.footR, body.thigh + body.shin);
 
   const t = bike.body.translation(), q = bike.body.rotation();
   _bPos.set(t.x, t.y, t.z);
