@@ -2,13 +2,22 @@ import * as THREE from 'three';
 import RAPIER from '@dimforge/rapier3d-compat';
 import { Noise2D } from './noise.ts';
 import { type Heightmap, rapierHeights } from './heightmap.ts';
-import { TRACK_HALF_WIDTH } from './track.ts';
 
-const SAND = new THREE.Color(0xc9a46c);
-const DIRT = new THREE.Color(0x8a5f3a);
-const TRACK = new THREE.Color(0x6e4a2c);
-const GRASS = new THREE.Color(0x7b8a45);
-const ROCK = new THREE.Color(0x9a5a3c);
+/** Ground colours for a venue. */
+export interface TerrainPalette {
+  base: number;
+  grass: number;
+  dirt: number;
+  track: number;
+  rock: number;
+  /** How much of the ground gets grass and dirt patches, 0..1. */
+  grassAmount: number;
+  dirtAmount: number;
+}
+
+export const DESERT: TerrainPalette = {
+  base: 0xc9a46c, grass: 0x7b8a45, dirt: 0x8a5f3a, track: 0x6e4a2c, rock: 0x9a5a3c, grassAmount: 0.8, dirtAmount: 0.6,
+};
 
 function makeDetailTexture() {
   const size = 256;
@@ -41,7 +50,9 @@ function makeDetailTexture() {
   return tex;
 }
 
-export function createTerrainMesh(hm: Heightmap) {
+export function createTerrainMesh(hm: Heightmap, palette: TerrainPalette = DESERT, uvScale = 6) {
+  const SAND = new THREE.Color(palette.base), GRASS = new THREE.Color(palette.grass);
+  const DIRT = new THREE.Color(palette.dirt), TRACK = new THREE.Color(palette.track), ROCK = new THREE.Color(palette.rock);
   const n = hm.cells + 1;
   const half = hm.size / 2;
   const positions = new Float32Array(n * n * 3);
@@ -57,7 +68,7 @@ export function createTerrainMesh(hm: Heightmap) {
       const x = -half + ix * hm.cellSize;
       const z = -half + iz * hm.cellSize;
       positions.set([x, h[i], z], i * 3);
-      uvs.set([x / 6, z / 6], i * 2);
+      uvs.set([x / uvScale, z / uvScale], i * 2);
 
       const hx = h[iz * n + Math.min(n - 1, ix + 1)] - h[iz * n + Math.max(0, ix - 1)];
       const hz = h[Math.min(n - 1, iz + 1) * n + ix] - h[Math.max(0, iz - 1) * n + ix];
@@ -65,10 +76,13 @@ export function createTerrainMesh(hm: Heightmap) {
 
       c.copy(SAND);
       const grassy = THREE.MathUtils.smoothstep(patch.fbm(x / 60, z / 60, 3), 0.05, 0.35);
-      c.lerp(GRASS, grassy * 0.8);
-      c.lerp(DIRT, THREE.MathUtils.smoothstep(patch.fbm(x / 25 + 5, z / 25, 2), 0.1, 0.5) * 0.6);
+      c.lerp(GRASS, grassy * palette.grassAmount);
+      c.lerp(DIRT, THREE.MathUtils.smoothstep(patch.fbm(x / 25 + 5, z / 25, 2), 0.1, 0.5) * palette.dirtAmount);
       // Worked dirt on the racing surface, fading out over the shoulders.
-      c.lerp(TRACK, 0.85 * (1 - THREE.MathUtils.smoothstep(hm.trackDistance[i], TRACK_HALF_WIDTH, TRACK_HALF_WIDTH + 3)));
+      if (hm.track) {
+        const W = hm.track.halfWidth;
+        c.lerp(TRACK, 0.85 * (1 - THREE.MathUtils.smoothstep(hm.trackDistance[i], W, W + 3)));
+      }
       c.lerp(ROCK, THREE.MathUtils.smoothstep(slope, 0.55, 1.1));
       colors.set([c.r, c.g, c.b], i * 3);
     }

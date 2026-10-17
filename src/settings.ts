@@ -1,5 +1,6 @@
 import type { CameraMode } from './camera.ts';
 import type { BikeColour } from './gltfBikeModel.ts';
+import type { VenueId } from './venue.ts';
 
 // Player options and the last race setup, kept in the browser between visits. Storage can be
 // unavailable (private windows, blocked site data), so every read and write is best-effort.
@@ -20,6 +21,10 @@ export interface Settings {
   opponents: number;
   difficulty: Difficulty;
   colour: BikeColour;
+  /** Stunt Quarry session length, seconds. */
+  duration: number;
+  /** Where Free Ride takes place. */
+  freeVenue: VenueId;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -35,6 +40,8 @@ export const DEFAULT_SETTINGS: Settings = {
   opponents: 6,
   difficulty: 'medium',
   colour: 'red',
+  duration: 120,
+  freeVenue: 'nationals',
 };
 
 const KEY = 'motocross-bobness:settings';

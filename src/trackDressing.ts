@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { type Heightmap, sampleHeight } from './heightmap.ts';
-import { TRACK_HALF_WIDTH } from './track.ts';
+import type { Track } from './track.ts';
 
 // Visual dressing for the track: marker stakes along both edges, hay bales round the outside of the
 // tight turns, and the start/finish arch. Nothing here has physics.
@@ -8,9 +8,14 @@ import { TRACK_HALF_WIDTH } from './track.ts';
 const STAKE_SPACING = 9;
 const BALE_SPACING = 2.6;
 
-export function createTrackDressing(hm: Heightmap) {
+/** 'outdoor': stakes and hay bales. 'stadium': Tuff Blocks lining both edges. */
+export function createTrackDressing(hm: Heightmap, track: Track, style: 'outdoor' | 'stadium' = 'outdoor') {
   const group = new THREE.Group();
-  const track = hm.track;
+  if (style === 'stadium') {
+    group.add(tuffBlocks(hm, track), createStartArch(hm, track));
+    return group;
+  }
+  const W = track.halfWidth;
   const m = new THREE.Matrix4();
   const q = new THREE.Quaternion();
   const one = new THREE.Vector3(1, 1, 1);
@@ -23,7 +28,7 @@ export function createTrackDressing(hm: Heightmap) {
   for (let s = 0; s < track.length; s += STAKE_SPACING) {
     const p = track.sample(s);
     for (const side of [-1, 1]) {
-      const lat = TRACK_HALF_WIDTH + 1.3;
+      const lat = W + 1.3;
       const x = p.x + p.tz * lat * side, z = p.z - p.tx * lat * side;
       m.compose(new THREE.Vector3(x, sampleHeight(hm, x, z) - 0.05, z), q, one);
       stakes.setMatrixAt(count, m);
@@ -42,7 +47,7 @@ export function createTrackDressing(hm: Heightmap) {
     const p = track.sample(s);
     if (Math.abs(p.curvature) < 1 / 45) continue;
     const outside = -Math.sign(p.curvature); // +1 = left of travel
-    const lat = TRACK_HALF_WIDTH + 3.2;
+    const lat = W + 3.2;
     const x = p.x + p.tz * lat * outside, z = p.z - p.tx * lat * outside;
     q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.atan2(-p.tz, p.tx)); // long side along the track
     balePositions.push(new THREE.Matrix4().compose(new THREE.Vector3(x, sampleHeight(hm, x, z) - 0.05, z), q.clone(), one));
@@ -53,8 +58,36 @@ export function createTrackDressing(hm: Heightmap) {
   bales.castShadow = bales.receiveShadow = true;
   group.add(bales);
 
-  group.add(createStartArch(hm));
+  group.add(createStartArch(hm, track));
   return group;
+}
+
+/** Supercross lane markers: low white and blue blocks along both edges. */
+function tuffBlocks(hm: Heightmap, track: Track) {
+  const spacing = 2.2;
+  const geo = new THREE.BoxGeometry(0.5, 0.45, 1.3).translate(0, 0.22, 0);
+  const blocks = new THREE.InstancedMesh(geo, new THREE.MeshLambertMaterial({ color: 0xffffff }), Math.ceil(track.length / spacing) * 2);
+  const m = new THREE.Matrix4(), q = new THREE.Quaternion(), one = new THREE.Vector3(1, 1, 1);
+  const white = new THREE.Color(0xf2f2f2), blue = new THREE.Color(0x1f5fd1);
+  let count = 0;
+  for (let s = 0; s < track.length; s += spacing) {
+    const p = track.sample(s);
+    // Skip where the other side of a hairpin or another straight is too close.
+    for (const side of [-1, 1]) {
+      const lat = track.halfWidth + 0.6;
+      const x = p.x + p.tz * lat * side, z = p.z - p.tx * lat * side;
+      const near = track.nearest(x, z, 3);
+      if (near && Math.abs(near.s - s) > 15 && Math.abs(near.s - s) < track.length - 15) continue;
+      q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.atan2(p.tx, p.tz));
+      m.compose(new THREE.Vector3(x, sampleHeight(hm, x, z) - 0.05, z), q, one);
+      blocks.setMatrixAt(count, m);
+      blocks.setColorAt(count, Math.floor(s / spacing) % 2 ? blue : white);
+      count++;
+    }
+  }
+  blocks.count = count;
+  blocks.castShadow = blocks.receiveShadow = true;
+  return blocks;
 }
 
 function chequeredBanner() {
@@ -81,10 +114,11 @@ function chequeredBanner() {
   return tex;
 }
 
-function createStartArch(hm: Heightmap) {
-  const p = hm.track.sample(0);
+function createStartArch(hm: Heightmap, track: Track) {
+  const W = track.halfWidth;
+  const p = track.sample(0);
   const arch = new THREE.Group();
-  const width = TRACK_HALF_WIDTH * 2 + 3;
+  const width = W * 2 + 3;
   const height = 4.6;
   const postMat = new THREE.MeshLambertMaterial({ color: 0x333338 });
   for (const side of [-1, 1]) {

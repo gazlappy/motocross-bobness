@@ -19,7 +19,7 @@ export class CameraRig {
   private spotTime = 0;
   private spotSide = 1;
   readonly camera: THREE.PerspectiveCamera;
-  private hm: Heightmap;
+  hm: Heightmap;
 
   constructor(camera: THREE.PerspectiveCamera, hm: Heightmap) {
     this.camera = camera;

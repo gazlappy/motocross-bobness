@@ -1,15 +1,73 @@
 import * as THREE from 'three';
 
-// The Nationals track: a closed loop through the map, sampled every metre. Everything that needs
-// to know "where on the track is this?" (terrain carving, race progress, AI, respawns) asks here.
+// A race track: a closed loop sampled every metre, with its jumps. Everything that needs to know
+// "where on the track is this?" (terrain carving, race progress, AI, respawns) asks here.
 
-/** Control points (x, z), driven in this order. The start line is the first point. */
-const CONTROL: [number, number][] = [
-  [0, 40], [0, -60], [0, -180], [-15, -235], [-60, -258], [-115, -245], [-145, -200],
-  [-150, -140], [-120, -95], [-150, -45], [-135, 10], [-120, 60], [-90, 105], [-45, 125], [-8, 100],
+export interface Jump {
+  at: number; // distance along the track where the take-off ramp starts
+  up: number; // ramp length
+  rise: number;
+  top: number; // flat top length (0 = kicker)
+  down: number; // landing length
+  /** Take-off speed (m/s) the AI aims for: the middle of the clean range from scripts/jump-speeds.ts. */
+  speed: number;
+}
+
+export interface TrackDef {
+  name: string;
+  /** Control points (x, z), driven in this order. The start line is the first point. */
+  control: [number, number][];
+  halfWidth: number;
+  jumps: Jump[];
+  /** Height of the track's own level along the lap (before jumps and berms). */
+  elevation?: (s: number, length: number) => number;
+  /** Berm height per unit curvature, and its cap (m). */
+  bermScale: number;
+  bermMax: number;
+  /** Metres either side over which curvature is averaged (wider = berms build more gradually). */
+  curvatureWindow: number;
+}
+
+const smoothstep = (e0: number, e1: number, x: number) => {
+  const t = Math.min(1, Math.max(0, (x - e0) / (e1 - e0)));
+  return t * t * (3 - 2 * t);
+};
+
+const nationalsJumps: Jump[] = [
+  // Start straight: rollers, a tabletop, then a step-up double.
+  { at: 40, up: 9, rise: 1.1, top: 0, down: 7, speed: 19 },
+  { at: 55, up: 9, rise: 1.1, top: 0, down: 7, speed: 19 },
+  { at: 70, up: 9, rise: 1.1, top: 0, down: 7, speed: 19 },
+  { at: 100, up: 9, rise: 3, top: 14, down: 12, speed: 16 },
+  { at: 155, up: 10, rise: 4, top: 0, down: 3, speed: 19 },
+  { at: 177, up: 4, rise: 4, top: 4, down: 14, speed: 19 },
+  // Back straight: the big tabletop.
+  { at: 425, up: 12, rise: 4.5, top: 18, down: 14, speed: 19 },
+  // Out of the whoops: a long tabletop (forgiving if you come up short), then another before the hairpin.
+  { at: 690, up: 10, rise: 3.5, top: 14, down: 12, speed: 17 },
+  { at: 760, up: 8, rise: 2.5, top: 10, down: 10, speed: 15 },
+  // Whoops: a run of small, tight bumps.
+  ...Array.from({ length: 7 }, (_, i) => ({ at: 638 + i * 5, up: 2.5, rise: 0.6, top: 0, down: 2.5, speed: 13 })),
 ];
 
-export const TRACK_HALF_WIDTH = 7;
+/** The outdoor Nationals loop, ~940 m. */
+export const NATIONALS: TrackDef = {
+  name: 'Nationals',
+  control: [
+    [0, 40], [0, -60], [0, -180], [-15, -235], [-60, -258], [-115, -245], [-145, -200],
+    [-150, -140], [-120, -95], [-150, -45], [-135, 10], [-120, 60], [-90, 105], [-45, 125], [-8, 100],
+  ],
+  halfWidth: 7,
+  jumps: nationalsJumps,
+  // Gentle ups and downs around the lap, so it isn't a flat oval.
+  elevation: (s, length) => {
+    const a = (s / length) * Math.PI * 2;
+    return 3.5 * Math.sin(2 * a + 1) + 2 * Math.sin(3 * a + 2.2) + 1;
+  },
+  bermScale: 85,
+  bermMax: 2.2,
+  curvatureWindow: 14,
+};
 
 export interface TrackSample {
   x: number;
@@ -32,14 +90,20 @@ export interface TrackHit {
 }
 
 export class Track {
+  readonly def: TrackDef;
   readonly samples: TrackSample[];
   readonly length: number;
+  readonly halfWidth: number;
+  readonly jumps: Jump[];
   private grid = new Map<string, number[]>();
   private static CELL = 20;
 
-  constructor() {
+  constructor(def: TrackDef = NATIONALS) {
+    this.def = def;
+    this.halfWidth = def.halfWidth;
+    this.jumps = [...def.jumps].sort((a, b) => a.at - b.at);
     const curve = new THREE.CatmullRomCurve3(
-      CONTROL.map(([x, z]) => new THREE.Vector3(x, 0, z)),
+      def.control.map(([x, z]) => new THREE.Vector3(x, 0, z)),
       true,
       'centripetal',
     );
@@ -60,16 +124,38 @@ export class Track {
       return -Math.asin(Math.max(-1, Math.min(1, cross))) / (4 * step);
     });
     // A wide window, so berms build up gradually into each turn instead of rising like a ramp.
+    const w = def.curvatureWindow;
     for (let i = 0; i < n; i++) {
       let sum = 0;
-      for (let k = -14; k <= 14; k++) sum += raw[(i + k + n) % n];
-      this.samples[i].curvature = sum / 29;
+      for (let k = -w; k <= w; k++) sum += raw[(i + k + n) % n];
+      this.samples[i].curvature = sum / (2 * w + 1);
     }
     this.samples.forEach((s, i) => {
       const key = this.key(s.x, s.z);
       if (!this.grid.has(key)) this.grid.set(key, []);
       this.grid.get(key)!.push(i);
     });
+  }
+
+  /** Height of jumps (above the track's own level) at a distance along the lap. */
+  jumpProfile(s: number) {
+    s = ((s % this.length) + this.length) % this.length;
+    let h = 0;
+    for (const j of this.jumps) {
+      const t = s - j.at;
+      if (t < 0 || t > j.up + j.top + j.down) continue;
+      let v: number;
+      if (t < j.up) v = j.rise * smoothstep(0, j.up, t);
+      else if (t < j.up + j.top) v = j.rise;
+      else v = j.rise * (1 - smoothstep(j.up + j.top, j.up + j.top + j.down, t));
+      h = Math.max(h, v);
+    }
+    return h;
+  }
+
+  /** The track's own level (before jumps and berms) at a distance along the lap. */
+  elevation(s: number) {
+    return this.def.elevation?.(s, this.length) ?? 0;
   }
 
   private key(x: number, z: number) {

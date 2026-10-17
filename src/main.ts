@@ -1,15 +1,19 @@
 import * as THREE from 'three';
 import RAPIER from '@dimforge/rapier3d-compat';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import { generateHeightmap, sampleHeight } from './heightmap.ts';
-import { createTerrainCollider, createTerrainMesh } from './terrain.ts';
-import { createTrackDressing } from './trackDressing.ts';
 import { Input } from './input.ts';
 import { CameraRig } from './camera.ts';
 import { SoundSystem } from './audio/sound.ts';
 import { Session, type SessionConfig } from './session.ts';
 import { Menu } from './menu.ts';
 import { type Settings, loadSettings } from './settings.ts';
+import { clockText, ordinal } from './format.ts';
+import type { ResultsTable } from './competition.ts';
+import { BajaRace } from './bajaRace.ts';
+import { Race } from './race.ts';
+import { StuntChallenge } from './stuntChallenge.ts';
+import type { Venue, VenueId } from './venue.ts';
+import { buildVenue } from './venues/index.ts';
 import bikeUrl from '../assets/models/Bike/mid_poly_dirt_bike.glb?url';
 import riderUrl from '../assets/models/Rider/low-poly_motocross_character_rigged.glb?url';
 
@@ -25,13 +29,13 @@ renderer.shadowMap.type = THREE.PCFShadowMap;
 document.getElementById('app')!.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x9cc4e4);
-scene.fog = new THREE.Fog(0xc9d6dc, 120, 520);
-
+scene.background = new THREE.Color();
+scene.fog = new THREE.Fog(0xffffff, 100, 500);
 const camera = new THREE.PerspectiveCamera(65, window.innerWidth / window.innerHeight, 0.1, 1200);
 
-scene.add(new THREE.HemisphereLight(0xcfe4ff, 0x8a6a48, 1.1));
-const sun = new THREE.DirectionalLight(0xfff1d6, 2.2);
+const hemi = new THREE.HemisphereLight();
+scene.add(hemi);
+const sun = new THREE.DirectionalLight();
 sun.castShadow = true;
 sun.shadow.mapSize.set(2048, 2048);
 const sc = sun.shadow.camera;
@@ -41,16 +45,9 @@ sc.near = 1;
 sc.far = 200;
 sun.shadow.bias = -0.0005;
 scene.add(sun, sun.target);
-const SUN_OFFSET = new THREE.Vector3(-60, 90, 40);
-
-const hm = generateHeightmap();
-scene.add(createTerrainMesh(hm));
-scene.add(createTrackDressing(hm));
-addRocks();
 
 const world = new RAPIER.World({ x: 0, y: -9.81, z: 0 });
 world.timestep = PHYSICS_DT;
-createTerrainCollider(world, hm);
 
 // The downloaded models, falling back to the box placeholders if either fails to load.
 const loader = new GLTFLoader();
@@ -59,10 +56,9 @@ const [bikeGltf, riderGltf] = await Promise.all(
 );
 
 const input = new Input();
-const rig = new CameraRig(camera, hm);
 const sound = new SoundSystem();
 const settings = loadSettings();
-const deps = { world, hm, scene, bikeGltf, riderGltf, sound };
+const deps = { world, scene, bikeGltf, riderGltf, sound };
 
 const hud = {
   speed: document.getElementById('speed-val')!,
@@ -74,10 +70,57 @@ const hud = {
   score: document.getElementById('score-val')!,
   trick: document.getElementById('trick')!,
   race: document.getElementById('race')!,
+  loading: document.getElementById('loading')!,
 };
 
-const ordinal = (n: number) => n + (['th', 'st', 'nd', 'rd'][n % 100 > 10 && n % 100 < 14 ? 0 : n % 10] ?? 'th');
-const clockText = (t: number) => `${Math.floor(t / 60)}:${(t % 60).toFixed(1).padStart(4, '0')}`;
+// ---- Venues ---------------------------------------------------------------------------------------
+
+const venues = new Map<VenueId, Venue>();
+let venue: Venue;
+let rig: CameraRig;
+
+/** Build a venue the first time it's needed (a second or so), behind the loading screen. */
+async function getVenue(id: VenueId) {
+  let v = venues.get(id);
+  if (!v) {
+    hud.loading.textContent = 'Loading…';
+    hud.loading.hidden = false;
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    v = buildVenue(id, world);
+    scene.add(v.root);
+    venues.set(id, v);
+  }
+  hud.loading.hidden = true;
+  return v;
+}
+
+/** Show one venue: its scenery and colliders on, every other venue's off, its sky and lighting. */
+function useVenue(v: Venue) {
+  venue = v;
+  for (const other of venues.values()) {
+    const on = other === v;
+    other.root.visible = on;
+    for (const c of other.colliders) c.setEnabled(on);
+  }
+  const a = v.atmosphere;
+  (scene.background as THREE.Color).set(a.sky);
+  const fog = scene.fog as THREE.Fog;
+  fog.color.set(a.fog.color);
+  fog.near = a.fog.near;
+  fog.far = a.fog.far;
+  hemi.color.set(a.hemi.sky);
+  hemi.groundColor.set(a.hemi.ground);
+  hemi.intensity = a.hemi.intensity;
+  sun.color.set(a.sun.color);
+  sun.intensity = a.sun.intensity;
+  camera.far = a.far;
+  camera.updateProjectionMatrix();
+  sound.setCrowd(a.crowd);
+  if (rig) rig.hm = v.hm;
+  else rig = new CameraRig(camera, v.hm);
+}
+
+// ---- HUD ------------------------------------------------------------------------------------------
 
 let bannerTimer = 0;
 function flashBanner(html: string, ms: number) {
@@ -98,17 +141,44 @@ function showTrick(html: string, banked: boolean, holdMs = 0) {
   trickHoldUntil = holdMs ? performance.now() + holdMs : 0;
 }
 
-const ATTRACT: SessionConfig = { mode: 'attract', laps: 999, opponents: 7, difficulty: 'medium', colour: 'red' };
+function tableHtml(t: ResultsTable) {
+  const head = `<tr>${t.head.map((h) => `<th>${h}</th>`).join('')}</tr>`;
+  const rows = t.rows.map((r) => `<tr class="${r.me ? 'me' : ''}">${r.cells.map((c) => `<td>${c}</td>`).join('')}</tr>`);
+  return { title: t.title, html: `<table>${head}${rows.join('')}</table>` };
+}
+
+/** Baja: a flat chevron over your bike pointing at the next waypoint (like the original's GPS arrow). */
+const chevron = new THREE.Shape();
+chevron.moveTo(0, 1.1);
+chevron.lineTo(0.75, -0.2);
+chevron.lineTo(0.28, -0.2);
+chevron.lineTo(0.28, -0.8);
+chevron.lineTo(-0.28, -0.8);
+chevron.lineTo(-0.28, -0.2);
+chevron.lineTo(-0.75, -0.2);
+chevron.closePath();
+const arrow = new THREE.Mesh(
+  new THREE.ExtrudeGeometry(chevron, { depth: 0.12, bevelEnabled: false }).rotateX(Math.PI / 2), // lie flat, point +Z
+  new THREE.MeshBasicMaterial({ color: 0xffb020, transparent: true, opacity: 0.92, depthTest: false }),
+);
+arrow.renderOrder = 10;
+arrow.visible = false;
+scene.add(arrow);
+
+const ATTRACT: SessionConfig = {
+  mode: 'attract', venue: 'nationals', laps: 999, opponents: 7, difficulty: 'medium', colour: 'red', duration: 0,
+};
 let session: Session;
 let lastConfig: SessionConfig = ATTRACT;
 let lastCount = -1;
 let resultsTimer = 0;
 
 /** Tear down whatever is running and start a game (or the menu's attract mode). */
-function begin(config: SessionConfig) {
+async function begin(config: SessionConfig) {
   session?.dispose();
   clearTimeout(resultsTimer);
-  session = new Session(deps, config);
+  useVenue(await getVenue(config.venue));
+  session = new Session(deps, venue, config);
   lastCount = -1;
   hud.banner.classList.remove('show');
   showTrick('', false);
@@ -118,7 +188,7 @@ function begin(config: SessionConfig) {
   attachHud();
 }
 
-/** Hook the HUD, sounds and race events to the human rider of the current game. */
+/** Hook the HUD, sounds and event callbacks to the human rider of the current game. */
 function attachHud() {
   const me = session.human;
   if (!me) return;
@@ -130,11 +200,13 @@ function attachHud() {
   };
   p.stunts.onBank = (points, label) => {
     sound.score();
+    sound.cheer(Math.min(1, points / 2500));
     showTrick(`${label}<b>+${points.toLocaleString()}</b>`, true, 2200);
     hud.score.textContent = p.stunts.total.toLocaleString();
   };
   p.onCrash = (cause) => {
     sound.impact(1);
+    sound.cheer(0.5);
     clearTimeout(bannerTimer);
     hud.banner.innerHTML = `WIPEOUT!<small>${cause}</small>`;
     hud.banner.classList.add('show');
@@ -146,43 +218,51 @@ function attachHud() {
   };
   p.onImpact = (s) => sound.impact(s * 0.7);
 
-  const race = session.race;
-  if (!race) return;
-  race.onLap = (r, lap, time) => {
-    if (r.human && lap < race.laps) flashBanner(`LAP ${lap + 1}<small>${clockText(time)}</small>`, 1500);
+  const event = session.event;
+  if (!event) return;
+  event.onLap = (r, lap, time) => {
+    if (r.human && event instanceof Race && lap < event.laps) {
+      flashBanner(`LAP ${lap + 1}<small>${clockText(time)}</small>`, 1500);
+    }
   };
-  race.onFinish = (r, place) => {
+  if (event instanceof BajaRace) {
+    event.onWaypoint = (r, i) => {
+      if (!r.human || i === event.waypoints.length - 1) return;
+      sound.score();
+      flashBanner(`WAYPOINT ${i + 1}<small>${clockText(event.clock)}</small>`, 1300);
+    };
+  }
+  event.onFinish = (r, place) => {
     if (r.human) {
-      flashBanner(`${ordinal(place).toUpperCase()}!<small>${clockText(r.finishTime)}</small>`, 2500);
-      resultsTimer = window.setTimeout(() => menu.showResults(resultsTable()), 2700);
+      const msg = event instanceof StuntChallenge
+        ? `TIME UP!<small>${p.stunts.total.toLocaleString()} points${event.newBest ? ' · new best!' : ''}</small>`
+        : `${ordinal(place).toUpperCase()}!<small>${clockText(r.finishTime)}</small>`;
+      flashBanner(msg, 2500);
+      sound.cheer(1);
+      resultsTimer = window.setTimeout(() => {
+        const t = tableHtml(event.results());
+        menu.showResults(t.html, t.title);
+      }, 2700);
     } else if (menu.screenName === 'results') {
-      menu.showResults(resultsTable());
+      const t = tableHtml(event.results());
+      menu.showResults(t.html, t.title);
     }
   };
 }
 
-function resultsTable() {
-  const race = session.race!;
-  const rows = race.standings().map((r, i) => {
-    const time = r.finished ? clockText(r.finishTime) : 'racing';
-    const best = Number.isFinite(r.bestLap) ? clockText(r.bestLap) : '-';
-    return `<tr class="${r.human ? 'me' : ''}"><td>${i + 1}</td><td>${r.name}</td><td>${time}</td><td>${best}</td></tr>`;
-  });
-  return `<table><tr><th></th><th>Rider</th><th>Time</th><th>Best lap</th></tr>${rows.join('')}</table>`;
-}
-
-function updateRaceHud() {
+function updateEventHud() {
   const me = session.human;
-  const race = session.race;
+  const event = session.event;
+  arrow.visible = false;
   if (!me) return;
-  if (!race) {
-    hud.race.innerHTML = 'FREE RIDE &nbsp; <b>Esc</b> for the menu';
+  if (!event) {
+    hud.race.innerHTML = `FREE RIDE · ${venue.name.toUpperCase()} &nbsp; <b>Esc</b> for the menu`;
     return;
   }
   const r = me.racer!;
-  if (!race.started) {
-    const n = Math.ceil(-race.clock);
-    if (n !== lastCount && n <= 3) {
+  if (!event.started) {
+    const n = Math.ceil(-event.clock);
+    if (n !== lastCount && n <= 3 && n >= 1) {
       lastCount = n;
       flashBanner(`${n}`, 900);
       sound.impact(0.25);
@@ -192,10 +272,28 @@ function updateRaceHud() {
     flashBanner('GO!', 900);
     hud.help.hidden = true;
     sound.score();
+    sound.cheer(0.6);
   }
-  const lap = Math.min(Math.max(r.lap, 1), race.laps);
-  const time = r.finished ? r.finishTime : Math.max(0, race.clock);
-  hud.race.innerHTML = `LAP <b>${lap}/${race.laps}</b> &nbsp; <b>${ordinal(race.position(r))}</b>/${race.racers.length} &nbsp; ${clockText(time)}`;
+  hud.race.innerHTML = event.hud(r);
+
+  if (event instanceof BajaRace) {
+    // Beacons: the next waypoint glows orange, ones already reached go green and faint.
+    venue.markers?.forEach((m, i) => {
+      const beacon = m.getObjectByName('beacon') as THREE.Mesh;
+      const mat = beacon.material as THREE.MeshBasicMaterial;
+      const next = i === r.nextCheckpoint;
+      mat.color.set(i < r.nextCheckpoint ? 0x7dff6a : next ? 0xff8c1a : 0xffffff);
+      mat.opacity = i < r.nextCheckpoint ? 0.06 : next ? 0.35 : 0.12;
+    });
+    if (!r.finished) {
+      const t = me.player.bike.body.translation();
+      const w = event.target(r);
+      arrow.visible = true;
+      arrow.position.set(t.x, t.y + 2.6, t.z);
+      arrow.lookAt(w.x, t.y + 2.6, w.z);
+      arrow.rotateX(0.35); // tilt the tail up towards the camera so it reads from behind
+    }
+  }
 }
 
 function applySettings(s: Settings) {
@@ -214,26 +312,26 @@ function applySettings(s: Settings) {
   hud.speedUnit.textContent = s.units === 'kmh' ? 'KM/H' : 'MPH';
   const me = session?.human;
   if (me) me.player.bike.autoShift = s.gearbox === 'auto';
-  if (me && rig.mode !== s.camera) rig.setMode(s.camera);
+  if (me && rig && rig.mode !== s.camera) rig.setMode(s.camera);
 }
 
 const menu = new Menu(document.getElementById('menu')!, settings, {
   start(config) {
     lastConfig = config;
-    begin(config);
+    void begin(config);
   },
   resume() {},
   restart() {
-    begin(lastConfig);
+    void begin(lastConfig);
   },
   quit() {
-    goToMenu();
+    void goToMenu();
   },
   settingsChanged: applySettings,
 });
 
-function goToMenu() {
-  begin(ATTRACT);
+async function goToMenu() {
+  await begin(ATTRACT);
   menu.showMain();
 }
 
@@ -244,15 +342,19 @@ window.addEventListener('resize', () => {
 });
 
 applySettings(settings);
-goToMenu();
-document.getElementById('loading')!.remove();
+await goToMenu();
 
+// ---- Main loop ------------------------------------------------------------------------------------
+
+const IDLE = { throttle: 0, brake: 0, steer: 0, leanForward: 0, leanSide: 0 };
 let accumulator = 0;
 let last = performance.now();
 
 function frame(now: number) {
+  requestAnimationFrame(frame);
   const dt = Math.min(0.1, (now - last) / 1000);
   last = now;
+  if (!hud.loading.hidden) return; // a venue is being built
   const me = session.human;
   // A game freezes while its pause menu is up; the attract mode and the results keep going.
   const running = !me || !menu.visible || menu.screenName === 'results';
@@ -293,11 +395,11 @@ function frame(now: number) {
   const star = session.star;
   const bike = star.player.bike;
   sound.update(me && running ? me.player.bike : null, camera);
-  updateRaceHud();
+  updateEventHud();
   const focus = star.player.focus;
   if (running) rig.update(bike, dt, focus);
   const t = focus ?? bike.body.translation();
-  sun.position.set(t.x, t.y, t.z).add(SUN_OFFSET);
+  sun.position.set(t.x, t.y, t.z).add(venue.atmosphere.sun.offset);
   sun.target.position.set(t.x, t.y, t.z);
 
   const speed = Math.abs(bike.speed) * (settings.units === 'kmh' ? 3.6 : 2.237);
@@ -306,37 +408,8 @@ function frame(now: number) {
   hud.rpm.style.width = `${Math.max(0, Math.min(1, bike.rpmFraction)) * 100}%`;
 
   renderer.render(scene, camera);
-  requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
 
-const IDLE = { throttle: 0, brake: 0, steer: 0, leanForward: 0, leanSide: 0 };
-
-function addRocks() {
-  let seed = 12345;
-  const rand = () => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 4294967296);
-  const geo = new THREE.DodecahedronGeometry(1, 0);
-  const mat = new THREE.MeshLambertMaterial({ color: 0x8b6248, flatShading: true });
-  const count = 260;
-  const rocks = new THREE.InstancedMesh(geo, mat, count);
-  const m = new THREE.Matrix4();
-  const q = new THREE.Quaternion();
-  let placed = 0;
-  for (let i = 0; placed < count && i < count * 4; i++) {
-    const x = (rand() - 0.5) * hm.size * 0.9;
-    const z = (rand() - 0.5) * hm.size * 0.9;
-    const n = hm.cells + 1;
-    const ix = Math.round((x + hm.size / 2) / hm.cellSize), iz = Math.round((z + hm.size / 2) / hm.cellSize);
-    if (hm.trackDistance[iz * n + ix] < 20) continue;
-    const s = 0.4 + rand() * rand() * 2.6;
-    q.setFromEuler(new THREE.Euler(i, i * 1.7, i * 0.3));
-    m.compose(new THREE.Vector3(x, sampleHeight(hm, x, z) + s * 0.3, z), q, new THREE.Vector3(s, s * 0.7, s));
-    rocks.setMatrixAt(placed++, m);
-  }
-  rocks.count = placed;
-  rocks.castShadow = rocks.receiveShadow = true;
-  scene.add(rocks);
-}
-
 // Handy for poking at the sim from the dev console.
-Object.assign(window, { game: { get session() { return session; }, world, hm, rig, sound, scene, menu, settings } });
+Object.assign(window, { game: { get session() { return session; }, get venue() { return venue; }, world, rig: () => rig, sound, scene, menu, settings, venues } });

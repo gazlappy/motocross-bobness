@@ -2,35 +2,41 @@ import * as THREE from 'three';
 import type RAPIER from '@dimforge/rapier3d-compat';
 import type { GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
-import { type Heightmap, sampleHeight } from './heightmap.ts';
 import { Player } from './player.ts';
 import { BikeModel } from './bikeModel.ts';
 import { RiderModel } from './riderModel.ts';
 import { type BikeColour, GltfBikeModel } from './gltfBikeModel.ts';
 import { GltfRiderModel } from './gltfRiderModel.ts';
 import { Sim } from './sim.ts';
-import { Race, type Racer } from './race.ts';
-import { AIDriver } from './ai.ts';
+import { Race } from './race.ts';
+import { BajaRace } from './bajaRace.ts';
+import { StuntChallenge } from './stuntChallenge.ts';
+import type { Competition, Racer } from './competition.ts';
+import { AIDriver, type Driver } from './ai.ts';
+import { BajaDriver } from './bajaDriver.ts';
 import type { Controls } from './input.ts';
 import type { SoundSystem } from './audio/sound.ts';
 import type { Difficulty } from './settings.ts';
+import type { Venue, VenueId } from './venue.ts';
 
-// One game: the riders, their models and the race (if any) on the shared world. Built when a game
-// starts and disposed when it ends, so the menu can switch games without reloading the page.
+// One game: the riders, their models and the event (if any) at a venue. Built when a game starts
+// and disposed when it ends, so the menu can switch games without reloading the page.
 
-export type GameMode = 'race' | 'freeride' | 'attract';
+export type GameMode = 'race' | 'baja' | 'quarry' | 'freeride' | 'attract';
 
 export interface SessionConfig {
   mode: GameMode;
+  venue: VenueId;
   laps: number;
   opponents: number;
   difficulty: Difficulty;
   colour: BikeColour;
+  /** Stunt Quarry session length, seconds. */
+  duration: number;
 }
 
 export interface SessionDeps {
   world: RAPIER.World;
-  hm: Heightmap;
   scene: THREE.Scene;
   bikeGltf: GLTF | null;
   riderGltf: GLTF | null;
@@ -43,7 +49,7 @@ export interface Entry {
   racer: Racer | null;
   bikeModel: BikeModel | GltfBikeModel;
   riderModel: RiderModel | GltfRiderModel;
-  ai: AIDriver | null;
+  ai: Driver | null;
 }
 
 /** Every rider who can line up, in the order they fill the field. */
@@ -70,24 +76,31 @@ const HELD: Controls = { throttle: 0, brake: 1, steer: 0, leanForward: 0, leanSi
 
 export class Session {
   readonly config: SessionConfig;
+  readonly venue: Venue;
   readonly sim: Sim;
-  readonly race: Race | null;
+  readonly event: Competition | null;
   readonly entries: Entry[] = [];
   readonly human: Entry | null;
   private deps: SessionDeps;
 
-  constructor(deps: SessionDeps, config: SessionConfig) {
+  constructor(deps: SessionDeps, venue: Venue, config: SessionConfig) {
     this.deps = deps;
+    this.venue = venue;
     this.config = config;
-    const { world, hm } = deps;
-    this.sim = new Sim(world);
-    this.race = config.mode === 'freeride' ? null : new Race(hm.track, config.mode === 'attract' ? 999 : config.laps);
+    this.sim = new Sim(deps.world);
+    const track = venue.hm.track;
+
+    if (config.mode === 'race' || config.mode === 'attract') this.event = new Race(track!, config.mode === 'attract' ? 999 : config.laps);
+    else if (config.mode === 'baja') this.event = new BajaRace(venue.waypoints!);
+    else if (config.mode === 'quarry') this.event = new StuntChallenge(config.duration);
+    else this.event = null;
     // The attract mode is already under way when the menu appears.
-    if (config.mode === 'attract' && this.race) this.race.clock = 0;
+    if (config.mode === 'attract') this.event!.clock = 0;
 
     const human = config.mode !== 'attract';
     const rivals = RIDERS.filter((r) => !human || r.colour !== config.colour);
-    const aiCount = config.mode === 'freeride' ? 0 : config.mode === 'attract' ? 7 : Math.min(config.opponents, rivals.length);
+    const racing = config.mode === 'race' || config.mode === 'baja';
+    const aiCount = config.mode === 'attract' ? 7 : racing ? Math.min(config.opponents, rivals.length) : 0;
     const skillScale = DIFFICULTY_SKILL[config.difficulty];
 
     // Grid slots: you start mid-pack (front row middle in a small field), rivals fill the rest.
@@ -97,9 +110,9 @@ export class Session {
 
     let slot = 0;
     if (human) this.add('You', config.colour, null, null, slots[slot++]);
-    for (const r of rivals.slice(0, aiCount)) {
-      this.add(r.name, r.colour, r.kit, Math.min(1, r.skill * skillScale), slots[slot++]);
-    }
+    rivals.slice(0, aiCount).forEach((r, i) => {
+      this.add(r.name, r.colour, r.kit, Math.min(1, r.skill * skillScale), slots[slot++], i);
+    });
     this.human = human ? this.entries[0] : null;
 
     for (const e of this.entries) {
@@ -110,12 +123,13 @@ export class Session {
     }
   }
 
-  private add(name: string, colour: BikeColour, kit: number | null, skill: number | null, slot: number) {
-    const { world, hm, scene, bikeGltf, riderGltf } = this.deps;
-    const [pos, yaw] = Race.gridSlot(hm.track, slot);
-    pos.y = sampleHeight(hm, pos.x, pos.z) + 1;
-    const player = new Player(world, hm, pos, yaw);
-    player.track = hm.track;
+  private add(name: string, colour: BikeColour, kit: number | null, skill: number | null, slot: number, index = 0) {
+    const { world, scene, bikeGltf, riderGltf } = this.deps;
+    const venue = this.venue;
+    const [pos, yaw] = venue.grid(slot);
+    const player = new Player(world, venue.hm, pos, yaw);
+    player.track = venue.hm.track;
+    player.cannonEnabled = venue.cannon;
     this.sim.players.push(player);
 
     let bikeModel: BikeModel | GltfBikeModel = new BikeModel();
@@ -142,14 +156,29 @@ export class Session {
     }
     scene.add(bikeModel.root, riderModel.root);
 
-    if (this.race) this.race.add(name, player, skill === null);
-    const racer = this.race ? this.race.racers[this.race.racers.length - 1] : null;
-    const ai = skill === null ? null : new AIDriver(player, hm.track, { skill, lane: ((slot % 3) - 1) * 3.5 });
+    if (this.event) this.event.add(name, player, skill === null);
+    const racer = this.event ? this.event.racers[this.event.racers.length - 1] : null;
+    if (this.event instanceof BajaRace && racer) {
+      // After a crash in the desert: back towards the last waypoint, facing the next.
+      const baja = this.event;
+      player.respawnGuide = {
+        back: () => (racer.nextCheckpoint > 0 ? baja.waypoints[racer.nextCheckpoint - 1] : pos),
+        ahead: () => baja.target(racer),
+      };
+    }
+    let ai: Driver | null = null;
+    if (skill !== null) {
+      if (this.event instanceof BajaRace) {
+        ai = new BajaDriver(player, this.event, racer!, venue.hm, skill, (index % 2 ? 1 : -1) * (10 + index * 6));
+      } else if (venue.hm.track) {
+        ai = new AIDriver(player, venue.hm.track, { skill, lane: ((slot % 3) - 1) * Math.min(3.5, venue.hm.track.halfWidth * 0.6) });
+      }
+    }
     this.entries.push({ name, player, racer, bikeModel, riderModel, ai });
   }
 
   get started() {
-    return !this.race || this.race.started;
+    return !this.event || this.event.started;
   }
 
   /** One physics step. `mine` is the human's controls (ignored when nobody is riding). */
@@ -157,7 +186,7 @@ export class Session {
     const go = this.started;
     const controls = this.entries.map((e) => (e.ai ? e.ai.controls(dt, this.sim.players, go) : go ? mine : HELD));
     this.sim.step(controls, dt);
-    this.race?.update(dt);
+    this.event?.update(dt);
   }
 
   /** Per rendered frame: move the models to match the physics. */
@@ -171,7 +200,7 @@ export class Session {
   /** Who the camera follows: you, or in attract mode whoever is leading. */
   get star(): Entry {
     if (this.human) return this.human;
-    const leader = this.race?.standings()[0];
+    const leader = this.event?.standings()[0];
     return this.entries.find((e) => e.racer === leader) ?? this.entries[0];
   }
 

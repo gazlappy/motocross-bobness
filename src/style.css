@@ -140,3 +140,4 @@ body.menu-open:not(.menu-main) .menu-panel {
 .results-table th { font-size: 12px; opacity: 0.7; text-align: left; padding: 2px 6px; }
 .results-table td { padding: 4px 6px; text-align: left; border-top: 1px solid rgba(255, 255, 255, 0.08); }
 .results-table tr.me td { color: var(--accent); font-weight: bold; }
+#loading[hidden] { display: none; }

@@ -34,6 +34,9 @@ export class SoundSystem {
   private wind?: { gain: GainNode; filter: BiquadFilterNode };
   private tyre?: { gain: GainNode; filter: BiquadFilterNode };
   private skid?: { gain: GainNode; filter: BiquadFilterNode };
+  private crowd?: { gain: GainNode; filter: BiquadFilterNode };
+  private crowdOn = false;
+  private crowdLevel = 0.05;
   private starting = false;
   private muted = false;
   private remotes: RemoteEngine[] = [];
@@ -77,6 +80,7 @@ export class SoundSystem {
     this.wind = this.noiseLayer(ctx, 'lowpass', 400, 0.7);
     this.tyre = this.noiseLayer(ctx, 'bandpass', 220, 0.8);
     this.skid = this.noiseLayer(ctx, 'bandpass', 1700, 1.4);
+    this.crowd = this.noiseLayer(ctx, 'bandpass', 950, 0.5);
     this.ctx = ctx;
     if (ctx.state === 'suspended') await ctx.resume();
   }
@@ -113,6 +117,22 @@ export class SoundSystem {
 
   get isMuted() {
     return this.muted;
+  }
+
+  /** Stadium crowd murmur on or off. */
+  setCrowd(on: boolean) {
+    this.crowdOn = on;
+  }
+
+  /** The crowd roars, 0..1 (big air, stunts). */
+  cheer(strength: number) {
+    const ctx = this.ctx;
+    if (!ctx || !this.crowd || !this.crowdOn) return;
+    const t = ctx.currentTime;
+    const g = this.crowd.gain.gain;
+    g.cancelScheduledValues(t);
+    g.setTargetAtTime(this.crowdLevel + 0.35 * Math.min(1, strength), t, 0.15);
+    g.setTargetAtTime(this.crowdLevel, t + 0.9 + strength, 0.8);
   }
 
   /** Overall volume, 0..1. */
@@ -156,6 +176,12 @@ export class SoundSystem {
     if (listener) this.updateRemotes(listener);
     const now = ctx.currentTime;
     this.engineGain!.gain.setTargetAtTime(bike ? 1 : 0, now, 0.05);
+    // The crowd murmurs, with the odd swell.
+    if (this.crowd) {
+      if (!this.crowdOn) this.crowd.gain.gain.setTargetAtTime(0, now, 0.3);
+      else if (Math.random() < 0.004) this.cheer(0.15 + Math.random() * 0.25);
+      else if (this.crowd.gain.gain.value < 0.01) this.crowd.gain.gain.setTargetAtTime(this.crowdLevel, now, 0.5);
+    }
     if (!bike) {
       for (const layer of [this.wind!, this.tyre!, this.skid!]) layer.gain.gain.setTargetAtTime(0, now, 0.05);
       return;

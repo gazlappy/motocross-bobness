@@ -1,54 +1,72 @@
-// Seven AI riders race on the Nationals track; reports lap times, crashes and pick-ups.
-// Usage: node scripts/race-test.ts [laps]
+// Seven AI riders race at a venue; reports finishing times, crashes and where they happened.
+// Usage: node scripts/race-test.ts [laps] [nationals|supercross|baja]
 import RAPIER from '@dimforge/rapier3d-compat';
-import { generateHeightmap, rapierHeights, sampleHeight } from '../src/heightmap.ts';
+import { rapierHeights } from '../src/heightmap.ts';
 import { Player } from '../src/player.ts';
 import { Sim } from '../src/sim.ts';
 import { Race } from '../src/race.ts';
-import { AIDriver } from '../src/ai.ts';
+import { BajaRace } from '../src/bajaRace.ts';
+import { AIDriver, type Driver } from '../src/ai.ts';
+import { BajaDriver } from '../src/bajaDriver.ts';
+import type { Competition } from '../src/competition.ts';
+import type { Ground } from '../src/venue.ts';
+import { nationalsGround } from '../src/venues/nationals.ts';
+import { supercrossGround } from '../src/venues/supercross.ts';
+import { bajaGround } from '../src/venues/baja.ts';
 
 await RAPIER.init();
 const laps = Number(process.argv[2] ?? 1);
-const hm = generateHeightmap();
+const venueId = process.argv[3] ?? 'nationals';
+const ground: Ground = venueId === 'supercross' ? supercrossGround() : venueId === 'baja' ? bajaGround() : nationalsGround();
+const hm = ground.hm;
 const world = new RAPIER.World({ x: 0, y: -9.81, z: 0 });
 const DT = 1 / 120;
 world.timestep = DT;
 world.createCollider(RAPIER.ColliderDesc.heightfield(hm.cells, hm.cells, rapierHeights(hm), { x: hm.size, y: 1, z: hm.size }));
+for (const d of ground.extra ?? []) world.createCollider(d);
 
 const sim = new Sim(world);
-const race = new Race(hm.track, laps);
-const drivers: AIDriver[] = [];
-const stats = new Map<string, { crashes: string[]; resets: number }>();
+const event: Competition = venueId === 'baja' ? new BajaRace(ground.waypoints!) : new Race(hm.track!, laps);
+const drivers: Driver[] = [];
+const crashes = new Map<string, string[]>();
 const names = ['Red', 'Orange', 'Yellow', 'Green', 'Blue', 'White', 'Black'];
 names.forEach((name, i) => {
-  const [pos, yaw] = Race.gridSlot(hm.track, i);
-  pos.y = sampleHeight(hm, pos.x, pos.z) + 1;
+  const [pos, yaw] = ground.grid(i);
   const player = new Player(world, hm, pos, yaw);
   player.track = hm.track;
+  player.cannonEnabled = venueId !== 'supercross';
   sim.players.push(player);
-  race.add(name, player, false);
-  const lane = ((i % 3) - 1) * 3.5;
-  drivers.push(new AIDriver(player, hm.track, { skill: 0.88 + 0.02 * (i % 6), lane }));
-  stats.set(name, { crashes: [], resets: 0 });
+  event.add(name, player, false);
+  const racer = event.racers[i];
+  if (event instanceof BajaRace) {
+    const baja = event;
+    player.respawnGuide = { back: () => (racer.nextCheckpoint > 0 ? baja.waypoints[racer.nextCheckpoint - 1] : pos), ahead: () => baja.target(racer) };
+  }
+  const skill = 0.88 + 0.02 * (i % 6);
+  drivers.push(event instanceof BajaRace
+    ? new BajaDriver(player, event, racer, hm, skill, (i % 2 ? 1 : -1) * (10 + i * 6))
+    : new AIDriver(player, hm.track!, { skill, lane: ((i % 3) - 1) * Math.min(3.5, hm.track!.halfWidth * 0.6) }));
+  crashes.set(name, []);
   player.onCrash = (cause) => {
     const t = player.bike.body.translation(), v = player.bike.body.linvel();
-    const hit = hm.track.nearest(t.x, t.z, 400);
-    stats.get(name)!.crashes.push(`${cause} @${hit?.s.toFixed(0)}m ${Math.hypot(v.x, v.z).toFixed(0)}m/s`);
+    const where = hm.track ? `@${hm.track.nearest(t.x, t.z, 400)?.s.toFixed(0)}m` : `@(${t.x.toFixed(0)},${t.z.toFixed(0)})`;
+    crashes.get(name)!.push(`${cause} ${where} ${Math.hypot(v.x, v.z).toFixed(0)}m/s`);
   };
 });
-race.onLap = (r, lap, time) => console.log(`${r.name} lap ${lap}: ${time.toFixed(1)} s`);
-race.onFinish = (r, place) => console.log(`${r.name} finished P${place} at ${r.finishTime.toFixed(1)} s`);
+event.onFinish = (r, place) => console.log(`${r.name} finished P${place} at ${r.finishTime.toFixed(1)} s`);
 
+const limit = venueId === 'baja' ? 400 : laps * 120 + 10;
 const t0 = performance.now();
-for (let i = 0; i < (laps * 110 + 10) / DT; i++) {
-  const controls = drivers.map((d) => d.controls(DT, sim.players, race.started));
+for (let i = 0; i < limit / DT; i++) {
+  const controls = drivers.map((d) => d.controls(DT, sim.players, event.started));
   sim.step(controls, DT);
   for (const p of sim.players) p.update(DT);
-  race.update(DT);
-  if (race.racers.every((r) => r.finished)) break;
+  event.update(DT);
+  if (event.racers.every((r) => r.finished)) break;
 }
-console.log(`\nsimulated ${race.clock.toFixed(0)} s of racing in ${((performance.now() - t0) / 1000).toFixed(1)} s`);
-for (const r of race.standings()) {
-  const st = stats.get(r.name)!;
-  console.log(`${String(race.position(r)).padStart(2)}. ${r.name.padEnd(7)} lap ${Math.min(r.lap, laps)}/${laps} ${r.finished ? `finished ${r.finishTime.toFixed(1)} s` : `at ${r.s.toFixed(0)} m`} | crashes ${st.crashes.length}${st.crashes.length ? ` (${st.crashes.join(', ')})` : ''}`);
+console.log(`\n${venueId}: simulated ${event.clock.toFixed(0)} s of racing in ${((performance.now() - t0) / 1000).toFixed(1)} s`);
+for (const r of event.standings()) {
+  const c = crashes.get(r.name)!;
+  const status = r.finished ? `finished ${r.finishTime.toFixed(1)} s` : venueId === 'baja' ? `at waypoint ${r.nextCheckpoint + 1}` : `lap ${r.lap} at ${r.s.toFixed(0)} m`;
+  console.log(`${String(event.position(r)).padStart(2)}. ${r.name.padEnd(7)} ${status} | crashes ${c.length}${c.length ? ` (${c.join(', ')})` : ''}`);
 }

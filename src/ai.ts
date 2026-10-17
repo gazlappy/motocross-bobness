@@ -1,8 +1,7 @@
 import * as THREE from 'three';
 import type { Controls } from './input.ts';
 import type { Player } from './player.ts';
-import { TRACK_HALF_WIDTH, type Track } from './track.ts';
-import { jumpApproaches, jumpProfile } from './heightmap.ts';
+import type { Track } from './track.ts';
 
 // An AI rider: follows the track on its own lane, picks a speed it can carry through the corners it
 // can see coming, keeps the bike's pitch matched to its flight in the air, and moves over to get
@@ -14,9 +13,28 @@ const TOP_SPEED = 30; // m/s
 const LOOK_SPEED = 70; // m of track scanned for corners
 const STUCK_TIME = 3.5;
 
-const JUMPS = jumpApproaches();
 const _f = new THREE.Vector3();
 const _q = new THREE.Quaternion();
+
+/** In the air, line the bike up with its flight so it lands on both wheels. */
+export function airControls(bike: Player['bike'], c: Controls) {
+  const vel = bike.body.linvel();
+  const flight = Math.atan2(vel.y, Math.hypot(vel.x, vel.z));
+  const r = bike.body.rotation();
+  _f.set(0, 0, -1).applyQuaternion(_q.set(r.x, r.y, r.z, r.w));
+  const pitch = Math.asin(THREE.MathUtils.clamp(_f.y, -1, 1));
+  // Only correct big errors; the bike already tends to follow its flight.
+  const err = pitch - flight * 0.5;
+  c.leanForward = Math.abs(err) > 0.2 ? THREE.MathUtils.clamp((err - Math.sign(err) * 0.2) * 2, -1, 1) : 0;
+  c.steer = 0;
+  c.throttle = 0.3;
+}
+
+/** Anything that can ride a bike: the AI drivers. */
+export interface Driver {
+  readonly player: Player;
+  controls(dt: number, others: Player[], go: boolean): Controls;
+}
 
 export interface AIOptions {
   /** 0..1 fraction of the ideal corner and top speeds. */
@@ -25,7 +43,7 @@ export interface AIOptions {
   lane: number;
 }
 
-export class AIDriver {
+export class AIDriver implements Driver {
   readonly player: Player;
   private track: Track;
   private skill: number;
@@ -61,8 +79,8 @@ export class AIDriver {
 
     // Near a jump, commit: hold the line, keep the bike straight, don't touch the brakes.
     const L = this.track.length;
-    const onJump = jumpProfile(this.s) > 0.05 || !bike.grounded ||
-      JUMPS.some((j) => { const d = (((j.s - this.s) % L) + L) % L; return d < 18; });
+    const onJump = this.track.jumpProfile(this.s) > 0.05 || !bike.grounded ||
+      this.track.jumps.some((j) => { const d = (((j.at - this.s) % L) + L) % L; return d < 18; });
 
     if (!onJump) this.chooseLane(dt, others);
 
@@ -84,8 +102,8 @@ export class AIDriver {
       target = Math.min(target, Math.sqrt(corner * corner + 2 * BRAKING * d));
     }
     // Hit each jump at the speed it's built for (overshooting a landing is as bad as casing it).
-    for (const j of JUMPS) {
-      const d = (((j.s - this.s) % L) + L) % L;
+    for (const j of this.track.jumps) {
+      const d = (((j.at - this.s) % L) + L) % L;
       if (d > LOOK_SPEED) continue;
       target = Math.min(target, Math.sqrt(j.speed * j.speed + 2 * BRAKING * Math.max(0, d - 3)));
     }
@@ -93,19 +111,11 @@ export class AIDriver {
       c.throttle = v < target ? THREE.MathUtils.clamp((target - v) * 0.5 + 0.35, 0, 1) : 0;
       c.brake = v > target + 0.8 && !onJump ? THREE.MathUtils.clamp((v - target) * 0.6, 0, 1) : 0;
     } else {
-      // In the air, line the bike up with its flight so it lands on both wheels.
-      const vel = bike.body.linvel();
-      const flight = Math.atan2(vel.y, Math.hypot(vel.x, vel.z));
-      _f.set(0, 0, -1).applyQuaternion(_q.invert());
-      const pitch = Math.asin(THREE.MathUtils.clamp(_f.y, -1, 1));
-      // Only correct big errors; the bike already tends to follow its flight.
-      const err = pitch - flight * 0.5;
-      c.leanForward = Math.abs(err) > 0.2 ? THREE.MathUtils.clamp((err - Math.sign(err) * 0.2) * 2, -1, 1) : 0;
-      c.throttle = 0.3;
+      airControls(bike, c);
     }
 
     // Way off line, stopped, or upside down for a while: pick the bike up.
-    const lost = hit.distance > TRACK_HALF_WIDTH + 25;
+    const lost = hit.distance > this.track.halfWidth + 25;
     this.stuck = (Math.abs(v) < 1.2 || lost) && bike.grounded ? this.stuck + dt : 0;
     if (this.stuck > STUCK_TIME) {
       this.stuck = 0;

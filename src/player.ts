@@ -6,7 +6,6 @@ import { type Heightmap, sampleHeight } from './heightmap.ts';
 import { Ragdoll } from './ragdoll.ts';
 import { StuntSystem } from './stunts.ts';
 import type { Track } from './track.ts';
-import { jumpProfile } from './heightmap.ts';
 import { type BikeMounts, DEFAULT_PROPORTIONS, type RiderProportions, createPose, ridingPose } from './riderPose.ts';
 
 // The player's bike and rider, including wipeouts: on a crash the rider becomes a ragdoll, the bike
@@ -41,20 +40,23 @@ export function drainEvents(queue: RAPIER.EventQueue): PhysicsEvents {
   return events;
 }
 
-const RUN_UP = 40; // m of flat track wanted before the next jump after a respawn
+/** Run-ups (m of flat track before the next jump) to look for after a crash, longest first. */
+const RUN_UPS = [40, 25, 15];
 
 /** Back up from `s` to flat track with a run-up to the next jump, so a respawn isn't a trap. */
 function safeRestart(track: Track, s: number) {
   const L = track.length;
-  const flat = (x: number) => jumpProfile((((x % L) + L) % L)) < 0.05;
-  let at = s - 4;
-  for (let back = 0; back < 200; back++, at--) {
-    let clear = true;
-    for (let d = -6; d <= RUN_UP && clear; d += 2) clear = flat(at + d);
-    if (clear) return at;
+  const flat = (x: number) => track.jumpProfile((((x % L) + L) % L)) < 0.05;
+  for (const runUp of RUN_UPS) {
+    let at = s - 4;
+    for (let back = 0; back < 200; back++, at--) {
+      let clear = true;
+      for (let d = -6; d <= runUp && clear; d += 2) clear = flat(at + d);
+      if (clear) return at;
+    }
   }
-  // No long flat stretch nearby: settle for just being off the jumps.
-  at = s - 4;
+  let at = s - 4;
+  // No flat stretch nearby at all: settle for just being off the jumps.
   for (let back = 0; back < 120 && !flat(at); back++) at--;
   return at;
 }
@@ -77,6 +79,10 @@ export class Player {
   track: Track | null = null;
   /** Preferred distance left of the track centreline when put back on it. */
   lane = 0;
+  /** Off for venues with walls (Supercross). */
+  cannonEnabled = true;
+  /** Off-track events (Baja): where to back off to after a crash, and which way to face. */
+  respawnGuide: { back(): THREE.Vector3; ahead(): THREE.Vector3 } | null = null;
 
   private world: RAPIER.World;
   private hm: Heightmap;
@@ -135,6 +141,7 @@ export class Player {
 
   /** Respawn position and heading: the given spot, or the nearest bit of track while racing. */
   private placement(at: THREE.Vector3, yaw: number): [THREE.Vector3, number] {
+    if (!this.track && this.respawnGuide) return this.guidedPlacement(at);
     const hit = this.track?.nearest(at.x, at.z, 400);
     if (!this.track || !hit) return [at, yaw];
     const p = this.track.sample(safeRestart(this.track, hit.s));
@@ -153,7 +160,7 @@ export class Player {
       bike.rider.body.setGravityScale(1, true);
     }
     this.cannonCooldown = Math.max(0, this.cannonCooldown - dt);
-    if (this.cannonCooldown > 0) return;
+    if (this.cannonCooldown > 0 || !this.cannonEnabled) return;
     const at = this.ragdoll ? this.ragdoll.centre : vec(bike.body.translation());
     const limit = this.hm.size / 2 - OUT_OF_BOUNDS_MARGIN;
     if (Math.abs(at.x) > limit || Math.abs(at.z) > limit) this.fireCannon(at);
@@ -269,6 +276,27 @@ export class Player {
   private ridingPose() {
     const mounts = this.mounts?.(this.bike.steerAngle);
     return ridingPose(this.bike, this.pose, this.proportions, mounts, this.stunts.state);
+  }
+
+  /** Off-track: step back towards the guide's point until the ground is flat enough to ride away. */
+  private guidedPlacement(at: THREE.Vector3): [THREE.Vector3, number] {
+    const back = this.respawnGuide!.back();
+    const dir = new THREE.Vector3(back.x - at.x, 0, back.z - at.z);
+    const len = dir.length();
+    dir.divideScalar(Math.max(1e-3, len));
+    const p = at.clone();
+    for (let d = 0; d < len; d += 8) {
+      p.set(at.x + dir.x * d, 0, at.z + dir.z * d);
+      if (this.flatAt(p.x, p.z)) break;
+    }
+    const ahead = this.respawnGuide!.ahead();
+    return [p, Math.atan2(-(ahead.x - p.x), -(ahead.z - p.z))];
+  }
+
+  private flatAt(x: number, z: number) {
+    const h = (dx: number, dz: number) => sampleHeight(this.hm, x + dx, z + dz);
+    const c = h(0, 0);
+    return [h(4, 0), h(-4, 0), h(0, 4), h(0, -4)].every((v) => Math.abs(v - c) < 1.2);
   }
 
   /** Take this player's bodies out of the physics world (when a game ends). */

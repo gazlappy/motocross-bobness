@@ -12,7 +12,9 @@
     "check:heightfield": "node scripts/check-heightfield.ts",
     "render:engine": "node scripts/render-engine.ts",
     "race": "node scripts/race-test.ts 3",
-    "jump-speeds": "node scripts/jump-speeds.ts"
+    "jump-speeds": "node scripts/jump-speeds.ts",
+    "race:sx": "node scripts/race-test.ts 2 supercross",
+    "race:baja": "node scripts/race-test.ts 1 baja"
   },
   "dependencies": {
     "@dimforge/rapier3d-compat": "^0.21.0",

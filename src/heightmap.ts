@@ -1,5 +1,5 @@
 import { Noise2D } from './noise.ts';
-import { TRACK_HALF_WIDTH, Track } from './track.ts';
+import { Track } from './track.ts';
 
 export interface Heightmap {
   /** Cells per side; there are (cells + 1)^2 height samples. */
@@ -9,9 +9,25 @@ export interface Heightmap {
   cellSize: number;
   /** Row-major: heights[iz * (cells + 1) + ix]. */
   heights: Float32Array;
-  /** Distance from each height sample to the track centreline, same layout as `heights`. */
+  /** Distance from each height sample to the track centreline (large where there's no track). */
   trackDistance: Float32Array;
-  track: Track;
+  track: Track | null;
+}
+
+/** Everything needed to build a venue's ground. */
+export interface TerrainDef {
+  size: number;
+  cells: number;
+  seed: number;
+  /** Ground height before any track work. */
+  natural: (noise: Noise2D, x: number, z: number) => number;
+  /** Cliff wall round the map edge: its height and how far in from the edge it starts. */
+  edgeWall: { height: number; width: number } | null;
+  track: Track | null;
+  /** Distance from the track over which the hills fade back to their natural height. */
+  trackBlend: number;
+  /** Spots levelled flat (start areas, Baja waypoints). */
+  flats?: { x: number; z: number; r: number }[];
 }
 
 const smoothstep = (e0: number, e1: number, x: number) => {
@@ -19,86 +35,36 @@ const smoothstep = (e0: number, e1: number, x: number) => {
   return t * t * (3 - 2 * t);
 };
 
-interface Jump {
-  at: number; // distance along the track where the take-off ramp starts
-  up: number; // ramp length
-  rise: number;
-  top: number; // flat top length (0 = kicker)
-  down: number; // landing length
-  /** Take-off speed (m/s) the AI aims for: the middle of the clean range from scripts/jump-speeds.ts. */
-  speed: number;
-}
+const FAR = 1000;
 
-// Track features by distance along the lap (see Track for the layout, ~940 m).
-const JUMPS: Jump[] = [
-  // Start straight: rollers, a tabletop, then a step-up double.
-  { at: 40, up: 9, rise: 1.1, top: 0, down: 7, speed: 19 },
-  { at: 55, up: 9, rise: 1.1, top: 0, down: 7, speed: 19 },
-  { at: 70, up: 9, rise: 1.1, top: 0, down: 7, speed: 19 },
-  { at: 100, up: 9, rise: 3, top: 14, down: 12, speed: 16 },
-  { at: 155, up: 10, rise: 4, top: 0, down: 3, speed: 19 },
-  { at: 177, up: 4, rise: 4, top: 4, down: 14, speed: 19 },
-  // Back straight: the big tabletop.
-  { at: 425, up: 12, rise: 4.5, top: 18, down: 14, speed: 19 },
-  // Out of the whoops: a long tabletop (forgiving if you come up short), then another before the hairpin.
-  { at: 690, up: 10, rise: 3.5, top: 14, down: 12, speed: 17 },
-  { at: 760, up: 8, rise: 2.5, top: 10, down: 10, speed: 15 },
-];
-// Whoops: a run of small, tight bumps.
-for (let i = 0; i < 7; i++) JUMPS.push({ at: 638 + i * 5, up: 2.5, rise: 0.6, top: 0, down: 2.5, speed: 13 });
-
-/** Each jump's take-off point and comfortable approach speed. */
-export function jumpApproaches() {
-  return JUMPS.map((j) => ({ s: j.at, speed: j.speed }));
-}
-
-/** Height of jumps (above the track's own level) at a distance along the lap. */
-export function jumpProfile(s: number) {
-  let h = 0;
-  for (const j of JUMPS) {
-    const t = s - j.at;
-    if (t < 0 || t > j.up + j.top + j.down) continue;
-    let v: number;
-    if (t < j.up) v = j.rise * smoothstep(0, j.up, t);
-    else if (t < j.up + j.top) v = j.rise;
-    else v = j.rise * (1 - smoothstep(j.up + j.top, j.up + j.top + j.down, t));
-    h = Math.max(h, v);
-  }
-  return h;
-}
-
-/** Gentle ups and downs around the lap, so it isn't a flat oval. */
-function trackElevation(s: number, length: number) {
-  const a = (s / length) * Math.PI * 2;
-  return 3.5 * Math.sin(2 * a + 1) + 2 * Math.sin(3 * a + 2.2) + 1;
-}
-
-export function generateHeightmap(track = new Track(), seed = 7, cells = 512, size = 640): Heightmap {
-  const noise = new Noise2D(seed);
+export function buildHeightmap(def: TerrainDef): Heightmap {
+  const { size, cells, track } = def;
+  const noise = new Noise2D(def.seed);
   const n = cells + 1;
   const half = size / 2;
   const cellSize = size / cells;
   const heights = new Float32Array(n * n);
-  const trackDistance = new Float32Array(n * n);
-  const samples = track.samples;
-  const W = TRACK_HALF_WIDTH;
+  const trackDistance = new Float32Array(n * n).fill(FAR);
+  const flats = (def.flats ?? []).map((f) => ({ ...f, h: def.natural(noise, f.x, f.z) }));
 
-  const levels = samples.map((_, i) => trackElevation(track.sAt(i), track.length));
-
-  // For each 16 m block of the map, the track samples that could be nearest to a point in it
-  // (anything further than REACH away is treated as "far from the track").
-  const BLOCK = 16, REACH = 100;
+  // For each block of the map, the track samples that could be nearest to a point in it
+  // (anything further than `reach` away is treated as off the track).
+  const BLOCK = 16, reach = def.trackBlend + 10;
   const blocks = Math.ceil(size / BLOCK);
   const candidates: number[][] = [];
-  for (let bz = 0; bz < blocks; bz++) {
-    for (let bx = 0; bx < blocks; bx++) {
-      const cx = -half + (bx + 0.5) * BLOCK, cz = -half + (bz + 0.5) * BLOCK;
-      const r = REACH + BLOCK;
-      const list: number[] = [];
-      samples.forEach((smp, i) => {
-        if ((smp.x - cx) ** 2 + (smp.z - cz) ** 2 < r * r) list.push(i);
-      });
-      candidates.push(list);
+  const samples = track?.samples ?? [];
+  const levels = samples.map((_, i) => track!.elevation(track!.sAt(i)));
+  if (track) {
+    for (let bz = 0; bz < blocks; bz++) {
+      for (let bx = 0; bx < blocks; bx++) {
+        const cx = -half + (bx + 0.5) * BLOCK, cz = -half + (bz + 0.5) * BLOCK;
+        const r = reach + BLOCK;
+        const list: number[] = [];
+        samples.forEach((smp, i) => {
+          if ((smp.x - cx) ** 2 + (smp.z - cz) ** 2 < r * r) list.push(i);
+        });
+        candidates.push(list);
+      }
     }
   }
 
@@ -106,60 +72,83 @@ export function generateHeightmap(track = new Track(), seed = 7, cells = 512, si
     for (let ix = 0; ix < n; ix++) {
       const x = -half + ix * cellSize;
       const z = -half + iz * cellSize;
+      let h = def.natural(noise, x, z);
 
-      let natural = noise.fbm(x / 230, z / 230, 5) * 34;
-      natural += Math.max(0, noise.fbm(x / 95 + 13.1, z / 95 - 4.2, 4)) * 18;
-      natural += noise.fbm(x / 18, z / 18, 2) * 0.5;
-
-      const block = candidates[
-        Math.min(blocks - 1, Math.floor((z + half) / BLOCK)) * blocks + Math.min(blocks - 1, Math.floor((x + half) / BLOCK))
-      ];
-      // Nearest sample, plus a distance-weighted track level: taking the level from the nearest
-      // sample alone leaves a crease in the infield where "nearest" flips between two straights.
-      let best = -1, bestD = Infinity, wSum = 0, levelSum = 0;
-      for (const i of block) {
-        const d = (samples[i].x - x) ** 2 + (samples[i].z - z) ** 2;
-        if (d < bestD) { bestD = d; best = i; }
-        const w = 1 / (d * d + 1);
-        wSum += w;
-        levelSum += w * levels[i];
+      for (const f of flats) {
+        const d = Math.hypot(x - f.x, z - f.z);
+        if (d < f.r) h += (f.h - h) * (1 - smoothstep(f.r * 0.55, f.r, d));
       }
-      if (best < 0) {
-        // Well away from the track: just the hills and the map edge.
-        const edge = half - Math.max(Math.abs(x), Math.abs(z));
-        heights[iz * n + ix] = natural + smoothstep(60, 0, edge) * 55;
-        trackDistance[iz * n + ix] = REACH;
-        continue;
-      }
-      const dist = Math.sqrt(bestD);
-      const smp = samples[best];
-      const s = track.sAt(best);
-      const lateral = (x - smp.x) * smp.tz - (z - smp.z) * smp.tx;
-      const base = levelSum / wSum;
 
-      // Hills fade into the track's own level over the infield and shoulders.
-      let h = base + (natural - base) * smoothstep(W + 2, 90, dist);
+      if (track) {
+        const block = candidates[
+          Math.min(blocks - 1, Math.floor((z + half) / BLOCK)) * blocks + Math.min(blocks - 1, Math.floor((x + half) / BLOCK))
+        ];
+        // Nearest sample, plus a distance-weighted track level: taking the level from the nearest
+        // sample alone leaves a crease in the infield where "nearest" flips between two straights.
+        let best = -1, bestD = Infinity, wSum = 0, levelSum = 0;
+        for (const i of block) {
+          const d = (samples[i].x - x) ** 2 + (samples[i].z - z) ** 2;
+          if (d < bestD) { bestD = d; best = i; }
+          const w = 1 / (d * d + 1);
+          wSum += w;
+          levelSum += w * levels[i];
+        }
+        if (best >= 0) {
+          const W = track.halfWidth;
+          const dist = Math.sqrt(bestD);
+          const smp = samples[best];
+          const along = (x - smp.x) * smp.tx + (z - smp.z) * smp.tz; // exact position between samples
+          const s = track.sAt(best) + along;
+          const lateral = (x - smp.x) * smp.tz - (z - smp.z) * smp.tx;
+          const base = levelSum / wSum;
 
-      // Jumps span the track and taper off at its edges.
-      h += jumpProfile(s) * (1 - smoothstep(W - 1, W + 4, dist));
+          // Hills fade into the track's own level over the infield and shoulders.
+          h = base + (h - base) * smoothstep(W + 2, def.trackBlend, dist);
 
-      // Berms: the outside of every turn banks up, more for tighter turns.
-      const k = smp.curvature;
-      if (Math.abs(k) > 0.005) {
-        const outside = -Math.sign(k) * lateral;
-        const berm = Math.min(2.2, Math.abs(k) * 85);
-        h += berm * smoothstep(0.15 * W, W + 1.5, outside) * (1 - smoothstep(W + 2, W + 9, outside));
+          // Jumps span the track and taper off at its edges.
+          h += track.jumpProfile(s) * (1 - smoothstep(W - 1, W + 4, dist));
+
+          // Berms: the outside of every turn banks up, more for tighter turns.
+          const k = smp.curvature;
+          if (Math.abs(k) > 0.005) {
+            const outside = -Math.sign(k) * lateral;
+            const berm = Math.min(track.def.bermMax, Math.abs(k) * track.def.bermScale);
+            h += berm * smoothstep(0.15 * W, W + 1.5, outside) * (1 - smoothstep(W + 2, W + 9, outside));
+          }
+          trackDistance[iz * n + ix] = dist;
+        }
       }
 
       // Cliff walls at the map edge, like the original's bowl-shaped arenas.
-      const edge = half - Math.max(Math.abs(x), Math.abs(z));
-      h += smoothstep(60, 0, edge) * 55;
-
+      if (def.edgeWall) {
+        const edge = half - Math.max(Math.abs(x), Math.abs(z));
+        h += smoothstep(def.edgeWall.width, 0, edge) * def.edgeWall.height;
+      }
       heights[iz * n + ix] = h;
-      trackDistance[iz * n + ix] = dist;
     }
   }
   return { cells, size, cellSize, heights, trackDistance, track };
+}
+
+/** The Nationals venue's ground: rolling desert hills with the track carved through. */
+export function nationalsTerrain(track = new Track()): TerrainDef {
+  return {
+    size: 640,
+    cells: 512,
+    seed: 7,
+    natural: (noise, x, z) =>
+      noise.fbm(x / 230, z / 230, 5) * 34 +
+      Math.max(0, noise.fbm(x / 95 + 13.1, z / 95 - 4.2, 4)) * 18 +
+      noise.fbm(x / 18, z / 18, 2) * 0.5,
+    edgeWall: { height: 55, width: 60 },
+    track,
+    trackBlend: 90,
+  };
+}
+
+/** The Nationals map (kept as the default for the test scripts). */
+export function generateHeightmap(track = new Track()): Heightmap {
+  return buildHeightmap(nationalsTerrain(track));
 }
 
 /** Bilinear height lookup in world coordinates. */

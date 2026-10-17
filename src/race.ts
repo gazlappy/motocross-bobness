@@ -1,8 +1,12 @@
 import * as THREE from 'three';
 import type { Player } from './player.ts';
 import type { Track } from './track.ts';
+import { type Competition, type Racer, type ResultsTable, newRacer } from './competition.ts';
+import { clockText, ordinal } from './format.ts';
 
-// A Nationals race: a countdown on the grid, ordered checkpoints round the lap (no shortcuts),
+export type { Racer } from './competition.ts';
+
+// A track race (Nationals, Supercross): a countdown on the grid, ordered checkpoints round the lap (no shortcuts),
 // lap counting from the start/finish line, and live standings.
 
 const CHECKPOINTS = 10;
@@ -10,22 +14,7 @@ const CHECKPOINT_WINDOW = 45; // m past a checkpoint in which it still counts
 const CHECKPOINT_REACH = 35; // m from the centreline
 export const COUNTDOWN = 3.5; // s: "3, 2, 1, GO" with GO at 0
 
-export interface Racer {
-  name: string;
-  player: Player;
-  human: boolean;
-  /** Distance along the track. */
-  s: number;
-  /** 0 on the grid, 1 once over the start line, laps + 1 when finished. */
-  lap: number;
-  nextCheckpoint: number;
-  finished: boolean;
-  finishTime: number;
-  lapStart: number;
-  bestLap: number;
-}
-
-export class Race {
+export class Race implements Competition {
   readonly laps: number;
   readonly racers: Racer[] = [];
   readonly track: Track;
@@ -46,17 +35,15 @@ export class Race {
   static gridSlot(track: Track, i: number): [THREE.Vector3, number] {
     const row = Math.floor(i / 3), col = (i % 3) - 1;
     const p = track.sample(track.length - 8 - row * 7);
-    const lateral = col * 4 + (row % 2 ? 1.5 : 0);
+    const spacing = Math.min(4, track.halfWidth * 0.6);
+    const lateral = col * spacing + (row % 2 ? spacing * 0.4 : 0);
     return [new THREE.Vector3(p.x + p.tz * lateral, 0, p.z - p.tx * lateral), Math.atan2(-p.tx, -p.tz)];
   }
 
   add(name: string, player: Player, human: boolean) {
     const t = player.bike.body.translation();
     const hit = this.track.nearest(t.x, t.z, 100);
-    this.racers.push({
-      name, player, human, s: hit?.s ?? 0, lap: 0, nextCheckpoint: 0,
-      finished: false, finishTime: 0, lapStart: 0, bestLap: Infinity,
-    });
+    this.racers.push(newRacer(name, player, human, hit?.s ?? 0));
   }
 
   get started() {
@@ -113,5 +100,22 @@ export class Race {
 
   position(r: Racer) {
     return this.standings().indexOf(r) + 1;
+  }
+
+  hud(r: Racer) {
+    const lap = Math.min(Math.max(r.lap, 1), this.laps);
+    const time = r.finished ? r.finishTime : Math.max(0, this.clock);
+    return `LAP <b>${lap}/${this.laps}</b> &nbsp; <b>${ordinal(this.position(r))}</b>/${this.racers.length} &nbsp; ${clockText(time)}`;
+  }
+
+  results(): ResultsTable {
+    return {
+      title: 'Race Results',
+      head: ['', 'Rider', 'Time', 'Best lap'],
+      rows: this.standings().map((r, i) => ({
+        me: r.human,
+        cells: [String(i + 1), r.name, r.finished ? clockText(r.finishTime) : 'racing', Number.isFinite(r.bestLap) ? clockText(r.bestLap) : '-'],
+      })),
+    };
   }
 }

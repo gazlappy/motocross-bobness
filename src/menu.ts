@@ -1,6 +1,7 @@
 import { BIKE_COLOURS, type BikeColour } from './gltfBikeModel.ts';
 import { KIT_COLOURS, type SessionConfig } from './session.ts';
 import { type Difficulty, type Settings, saveSettings } from './settings.ts';
+import type { VenueId } from './venue.ts';
 
 // The front end: main menu over the attract-mode race, game select, options, credits, pause and
 // results. Plain DOM, driven by mouse, keyboard (arrows, Enter, Esc) or the gamepad's Start.
@@ -16,19 +17,22 @@ export interface MenuHandlers {
 type Screen = 'main' | 'select' | 'options' | 'credits' | 'pause' | 'results';
 
 interface Mode {
-  id: SessionConfig['mode'] | 'supercross' | 'baja' | 'quarry';
+  id: string;
+  mode: SessionConfig['mode'];
+  venue: VenueId | null; // null: chosen in the setup (Free Ride)
   name: string;
   blurb: string;
-  ready: boolean;
 }
 
 const MODES: Mode[] = [
-  { id: 'race', name: 'Nationals', blurb: 'Outdoor motocross: berms, doubles and whoops against the field.', ready: true },
-  { id: 'freeride', name: 'Free Ride', blurb: 'The whole map to yourself. Practise lines, stunts and the cannon.', ready: true },
-  { id: 'supercross', name: 'Supercross', blurb: 'Indoor stadium racing with tight rhythm sections.', ready: false },
-  { id: 'baja', name: 'Baja', blurb: 'Open country, waypoint to waypoint.', ready: false },
-  { id: 'quarry', name: 'Stunt Quarry', blurb: 'Big hills, bigger air. Score the most stunt points.', ready: false },
+  { id: 'nationals', mode: 'race', venue: 'nationals', name: 'Nationals', blurb: 'Outdoor motocross: berms, doubles and whoops against the field.' },
+  { id: 'supercross', mode: 'race', venue: 'supercross', name: 'Supercross', blurb: 'Indoor stadium racing: hairpins, rhythm sections, whoops and big tabletops.' },
+  { id: 'baja', mode: 'baja', venue: 'baja', name: 'Baja', blurb: 'Open desert, waypoint to waypoint. Pick your own line.' },
+  { id: 'quarry', mode: 'quarry', venue: 'quarry', name: 'Stunt Quarry', blurb: 'Huge ramps and banks. Score the most stunt points in time.' },
+  { id: 'freeride', mode: 'freeride', venue: null, name: 'Free Ride', blurb: 'Any venue to yourself. Practise lines, stunts and the cannon.' },
 ];
+
+const VENUE_NAMES: Record<VenueId, string> = { nationals: 'Nationals', supercross: 'Supercross', baja: 'Baja', quarry: 'Quarry' };
 
 const el = <K extends keyof HTMLElementTagNameMap>(tag: K, cls = '', html = '') => {
   const e = document.createElement(tag);
@@ -46,6 +50,7 @@ export class Menu {
   private stack: Screen[] = [];
   private mode: Mode = MODES[0];
   private resultsHtml = '';
+  private resultsTitle = 'Results';
 
   constructor(root: HTMLElement, settings: Settings, handlers: MenuHandlers) {
     this.root = root;
@@ -74,8 +79,9 @@ export class Menu {
     this.open('main', true);
   }
 
-  showResults(tableHtml: string) {
+  showResults(tableHtml: string, title = 'Results') {
     this.resultsHtml = tableHtml;
+    this.resultsTitle = title;
     this.open('results', true);
   }
 
@@ -155,10 +161,8 @@ export class Menu {
     this.title('Select Game');
     const cards = el('div', 'mode-cards');
     for (const m of MODES) {
-      const card = el('button', `mode-card${m === this.mode ? ' selected' : ''}`,
-        `<b>${m.name}</b><span>${m.ready ? m.blurb : 'Coming soon'}</span>`);
+      const card = el('button', `mode-card${m === this.mode ? ' selected' : ''}`, `<b>${m.name}</b><span>${m.blurb}</span>`);
       card.type = 'button';
-      card.disabled = !m.ready;
       card.addEventListener('click', () => {
         this.mode = m;
         this.render();
@@ -169,24 +173,33 @@ export class Menu {
 
     const st = this.settings;
     const setup = el('div', 'setup');
-    if (this.mode.id === 'race') {
+    const m = this.mode;
+    if (m.mode === 'race') setup.append(this.segmented('Laps', [1, 3, 5], st.laps, (v) => this.set({ laps: v })));
+    if (m.mode === 'race' || m.mode === 'baja') {
       setup.append(
-        this.segmented('Laps', [1, 3, 5], st.laps, (v) => this.set({ laps: v })),
         this.segmented('Opponents', [0, 1, 2, 3, 4, 5, 6], st.opponents, (v) => this.set({ opponents: v })),
         this.segmented<Difficulty>('Rivals', ['easy', 'medium', 'hard'], st.difficulty, (v) => this.set({ difficulty: v })),
       );
+    }
+    if (m.mode === 'quarry') {
+      setup.append(this.segmented('Time', [60, 120, 180], st.duration, (v) => this.set({ duration: v }), (v) => `${v / 60} min`));
+    }
+    if (m.mode === 'freeride') {
+      setup.append(this.segmented<VenueId>('Venue', ['nationals', 'supercross', 'baja', 'quarry'], st.freeVenue,
+        (v) => this.set({ freeVenue: v }), (v) => VENUE_NAMES[v]));
     }
     setup.append(this.colourPicker());
     this.panel.append(setup);
 
     const row = el('div', 'menu-row');
-    const go = el('button', 'menu-btn go', this.mode.id === 'race' ? 'Race!' : 'Ride!');
+    const go = el('button', 'menu-btn go', this.mode.mode === 'race' || this.mode.mode === 'baja' ? 'Race!' : 'Ride!');
     go.type = 'button';
     go.addEventListener('click', () => {
       this.hide();
       this.h.start({
-        mode: this.mode.id as SessionConfig['mode'],
-        laps: st.laps, opponents: st.opponents, difficulty: st.difficulty, colour: st.colour,
+        mode: this.mode.mode,
+        venue: this.mode.venue ?? st.freeVenue,
+        laps: st.laps, opponents: st.opponents, difficulty: st.difficulty, colour: st.colour, duration: st.duration,
       });
     });
     const back = el('button', 'menu-btn small', 'Back');
@@ -267,9 +280,9 @@ export class Menu {
   }
 
   private renderResults() {
-    this.title('Race Results');
+    this.title(this.resultsTitle);
     this.panel.append(el('div', 'results-table', this.resultsHtml));
-    this.button('Race again', () => {
+    this.button('Go again', () => {
       this.hide();
       this.h.restart();
     });
