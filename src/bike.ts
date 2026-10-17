@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import RAPIER from '@dimforge/rapier3d-compat';
 import type { Controls } from './input.ts';
-import { GROUP_BIKE, GROUP_PROBE, GROUP_WORLD, Rider, groups } from './rider.ts';
+import { GROUP_BIKE, GROUP_PROBE, GROUP_RAGDOLL, GROUP_WORLD, Rider, groups } from './rider.ts';
 
 // Bike-local axes: forward = -Z, right = +X, up = +Y.
 
@@ -42,6 +42,13 @@ const DRAG_CDA = 0.55;
 const LEAN_KP = 140;
 const LEAN_KD = 35;
 const LEAN_RATE = 2.5; // rad/s
+
+// Crash thresholds.
+const CRASH_IMPACT = 16; // m/s into the ground: a flat landing from ~13 m (the original was forgiving)
+const CRASH_NOSE_DOWN = 0.8; // rad, front wheel landing that steep goes over the bars
+const CRASH_LOOPED = 1.15; // rad, landing on the rear wheel that far past vertical-ish
+const CRASH_LANDING_ROLL = 1.05; // rad, landing leaned over this far
+const CRASH_STRETCH = 0.42; // m, rider ripped off the pegs
 const MAX_LEAN = Math.atan(0.95 * TYRE_MU); // steepest lean the tyres can hold
 
 function torqueAt(rpm: number) {
@@ -84,6 +91,7 @@ const _rn = new THREE.Vector3();
 const _qInv = new THREE.Quaternion();
 
 const toR = (v: THREE.Vector3) => ({ x: v.x, y: v.y, z: v.z });
+const IDLE_CONTROLS: Controls = { throttle: 0, brake: 0, steer: 0, leanForward: 0, leanSide: 0 };
 
 /**
  * Mass the bike body presents to an impulse along `dir` at `point`, counting the rotation it
@@ -109,6 +117,11 @@ export class Bike {
   throttle = 0;
   /** Hardest wheel touchdown (m/s) since the sound system last read it. */
   landingImpact = 0;
+  /** Set when the riding goes wrong; the player turns it into a wipeout. */
+  crashCause: string | null = null;
+  /** While crashed the rider is a ragdoll and the bike is left to tumble. */
+  crashed = false;
+  readonly frame: RAPIER.Collider;
   lean = new THREE.Vector2(); // rider weight shift: x = side, y = forward
   private shiftCooldown = 0;
   private leanTarget = 0;
@@ -131,12 +144,14 @@ export class Bike {
     this.body = world.createRigidBody(desc);
 
     // The frame only touches the ground when something has gone wrong.
-    world.createCollider(
+    this.frame = world.createCollider(
       RAPIER.ColliderDesc.cuboid(0.16, 0.24, 0.6)
         .setTranslation(0, 0.18, 0)
         .setDensity(0)
         .setFriction(0.6)
-        .setCollisionGroups(groups(GROUP_BIKE, GROUP_WORLD)),
+        .setRestitution(0.2)
+        .setCollisionGroups(groups(GROUP_BIKE, GROUP_WORLD | GROUP_RAGDOLL))
+        .setActiveEvents(RAPIER.ActiveEvents.COLLISION_EVENTS),
       this.body,
     );
     this.rider = new Rider(world, this.body);
@@ -174,7 +189,12 @@ export class Bike {
     this.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
     this.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
     this.lean.set(0, 0);
+    this.leanTarget = 0;
+    this.crashed = false;
+    this.crashCause = null;
+    this.rider.setActive(true);
     this.rider.snapTo(this.body);
+    for (const w of this.wheels) w.grounded = false;
     this.gear = 0;
     this.rpm = IDLE_RPM;
     this.upsideDownTime = 0;
@@ -187,11 +207,14 @@ export class Bike {
     return Math.atan2(-_fwd.x, -_fwd.z);
   }
 
-  get isUpsideDownLong() {
-    return this.upsideDownTime > 2.5;
+  /** Report a crash (the first cause wins until the player handles it). */
+  crash(cause: string) {
+    if (!this.crashed && !this.crashCause) this.crashCause = cause;
   }
 
-  step(c: Controls, dt: number) {
+  step(input: Controls, dt: number) {
+    // Once crashed nobody is riding: no throttle, no balance, the bike just tumbles.
+    const c = this.crashed ? IDLE_CONTROLS : input;
     const body = this.body;
     const r = body.rotation();
     _q.set(r.x, r.y, r.z, r.w);
@@ -226,7 +249,10 @@ export class Bike {
     );
     this.lean.x += (c.leanSide - this.lean.x) * Math.min(1, dt * 8);
     this.lean.y += (c.leanForward - this.lean.y) * Math.min(1, dt * 8);
-    this.rider.couple(body, this.lean, dt);
+    if (!this.crashed) {
+      this.rider.couple(body, this.lean, dt);
+      if (this.rider.stretch > CRASH_STRETCH) this.crash('thrown off');
+    }
 
     this.updateEngine(c, dt);
 
@@ -262,7 +288,10 @@ export class Bike {
       _v.subVectors(origin, _com);
       _v.crossVectors(_angv, _v).add(_linv);
       const compVel = -_v.dot(w.surfaceNormal) / Math.max(0.3, _up.dot(w.surfaceNormal));
-      if (touchdown) this.landingImpact = Math.max(this.landingImpact, compVel);
+      if (touchdown) {
+        this.landingImpact = Math.max(this.landingImpact, compVel);
+        this.checkLanding(w);
+      }
       w.compression = compression;
 
       let springF = SUSP_K * compression;
@@ -331,9 +360,22 @@ export class Bike {
       body.applyImpulse(toR(_imp.copy(_linv).normalize().multiplyScalar(-drag)), true);
     }
 
-    this.applyBalance(c, dt);
+    if (!this.crashed) this.applyBalance(c, dt);
 
-    this.upsideDownTime = _up.y < 0.1 && absSpeed < 2 ? this.upsideDownTime + dt : 0;
+    this.upsideDownTime = _up.y < 0.1 ? this.upsideDownTime + dt : 0;
+    if (this.upsideDownTime > 0.6) this.crash('upside down');
+  }
+
+  /** A wheel just touched down: was that a landing a rider could ride away from? */
+  private checkLanding(w: WheelState) {
+    const n = w.surfaceNormal;
+    const impact = -_linv.dot(n); // the bike's own speed into the ground, ignoring how it's rotating
+    const pitch = Math.asin(THREE.MathUtils.clamp(_fwd.dot(n), -1, 1)); // + nose up
+    const roll = Math.asin(THREE.MathUtils.clamp(_right.dot(n), -1, 1));
+    if (impact > CRASH_IMPACT) this.crash('cased it');
+    else if (w.steered && pitch < -CRASH_NOSE_DOWN) this.crash('over the bars');
+    else if (!w.steered && pitch > CRASH_LOOPED) this.crash('looped out');
+    else if (Math.abs(roll) > CRASH_LANDING_ROLL) this.crash('landed sideways');
   }
 
   /** How far the nose is lifted off the ground (radians), 0 unless the rear wheel is down. */

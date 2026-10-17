@@ -31,17 +31,19 @@ export class CameraRig {
     this.initialised = false;
   }
 
-  update(bike: Bike, dt: number) {
+  /** `focus`, when given, replaces the bike as the subject (the rider tumbling after a crash). */
+  update(bike: Bike, dt: number, focus: THREE.Vector3 | null = null) {
     const t = bike.body.translation();
     const r = bike.body.rotation();
     _target.set(t.x, t.y, t.z);
+    if (focus) _target.copy(focus);
 
     if (this.mode === 'thrill') {
-      this.updateThrill(bike, dt);
+      this.updateThrill(bike, dt, focus);
       return;
     }
 
-    if (this.mode === 'helmet') {
+    if (this.mode === 'helmet' && !focus) {
       _q.set(r.x, r.y, r.z, r.w);
       const eye = new THREE.Vector3(0, 1.38, -0.2).applyQuaternion(_q).add(_target);
       this.camera.position.copy(eye);
@@ -58,9 +60,10 @@ export class CameraRig {
     if (!this.initialised) this.heading = yaw;
     let dh = yaw - this.heading;
     dh = Math.atan2(Math.sin(dh), Math.cos(dh));
-    this.heading += dh * Math.min(1, dt * (bike.grounded ? 4 : 1.2));
+    // Hold the heading steady while the bike cartwheels after a crash.
+    if (!focus) this.heading += dh * Math.min(1, dt * (bike.grounded ? 4 : 1.2));
 
-    const far = this.mode === 'far';
+    const far = this.mode === 'far' || !!focus;
     const dist = (far ? 9 : 5.2) + Math.min(flatSpeed, 30) * 0.05;
     const height = far ? 3.6 : 2.0;
     _desired.set(
@@ -89,8 +92,8 @@ export class CameraRig {
    * Thrill Cam: a trackside camera placed ahead of the bike that zooms to follow it, cutting to a
    * new spot when the bike gets far away, passes behind it, or a hill blocks the view.
    */
-  private updateThrill(bike: Bike, dt: number) {
-    const t = bike.body.translation();
+  private updateThrill(bike: Bike, dt: number, focus: THREE.Vector3 | null) {
+    const t = focus ?? bike.body.translation();
     _target.set(t.x, t.y + 0.7, t.z);
     this.spotTime += dt;
     const dist = this.spot.distanceTo(_target);

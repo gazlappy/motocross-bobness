@@ -20,6 +20,15 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #9cc4e4; fon
   background: var(--hud-bg); color: var(--hud-fg); font-size: 13px; line-height: 1.6; box-sizing: border-box;
 }
 #help b { color: var(--accent); }
+#banner {
+  position: fixed; left: 50%; top: 28%; transform: translate(-50%, -50%) scale(0.6);
+  color: var(--accent); font-size: clamp(36px, 9vw, 84px); font-weight: 900; font-style: italic;
+  letter-spacing: 0.04em; text-align: center; pointer-events: none; opacity: 0;
+  text-shadow: 3px 3px 0 #2a1d12, -1px -1px 0 #2a1d12;
+  transition: opacity 0.15s, transform 0.25s cubic-bezier(0.2, 1.6, 0.4, 1);
+}
+#banner.show { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+#banner small { display: block; font-size: 0.32em; color: var(--hud-fg); font-style: normal; letter-spacing: 0.08em; }
 #loading {
   position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
   color: var(--hud-fg); font-size: 28px; background: #2a1d12;

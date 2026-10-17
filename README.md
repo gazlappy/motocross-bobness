@@ -11,6 +11,8 @@ npm run sim        # headless physics checks (standing still, cruising, turning,
 ```
 
 Controls: **W** throttle, **S** brake, **A/D** steer, **↑/↓** lean forward/back, **←/→** lean sideways,
-**Q/E** shift (switches to manual), **M** auto/manual, **C** camera (chase/far/helmet/thrill), **R** reset, **N** mute. Gamepad supported.
+**Q/E** shift (switches to manual), **M** auto/manual, **C** camera (chase/far/helmet/thrill), **R** reset (or skip a wipeout), **N** mute. Gamepad supported.
+
+Crashes: land on your head, nose-dive, loop out, land flat from very high or get thrown off and the rider goes ragdoll; you respawn where you crashed once they stop tumbling.
 
 Stack: TypeScript, Vite, Three.js, Rapier (WASM physics).

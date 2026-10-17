@@ -28,6 +28,7 @@ export const GROUP_WORLD = 0x0001;
 export const GROUP_BIKE = 0x0002;
 export const GROUP_RIDER = 0x0004;
 export const GROUP_PROBE = 0x0008;
+export const GROUP_RAGDOLL = 0x0010;
 export const groups = (membership: number, filter: number) => (membership << 16) | filter;
 
 /** Points on the rider in rider space, used for posing the visual model. */
@@ -68,6 +69,9 @@ export class Rider {
   /** Target pose in bike space, after weight shift. */
   readonly targetPos = NEUTRAL.clone();
   readonly targetRot = new THREE.Quaternion();
+  /** How far the feet have been pulled off the pegs; past MAX_STRETCH the rider is thrown off. */
+  stretch = 0;
+  readonly colliders: RAPIER.Collider[] = [];
 
   constructor(world: RAPIER.World, bike: RAPIER.RigidBody) {
     this.body = world.createRigidBody(
@@ -78,16 +82,21 @@ export class Rider {
         .setCcdEnabled(true)
         .setCanSleep(false),
     );
+    // Any contact on the torso or helmet means the rider has hit the ground: a crash.
     const g = groups(GROUP_RIDER, GROUP_WORLD);
-    world.createCollider(
-      RAPIER.ColliderDesc.capsule(0.22, 0.17).setTranslation(0, 0.32, -0.06).setDensity(0).setCollisionGroups(g),
-      this.body,
-    );
-    world.createCollider(
-      RAPIER.ColliderDesc.ball(0.15).setTranslation(0, 0.74, -0.28).setDensity(0).setCollisionGroups(g),
-      this.body,
-    );
+    for (const desc of [
+      RAPIER.ColliderDesc.capsule(0.22, 0.17).setTranslation(0, 0.32, -0.06),
+      RAPIER.ColliderDesc.ball(0.15).setTranslation(0, 0.74, -0.28),
+    ]) {
+      desc.setDensity(0).setCollisionGroups(g).setActiveEvents(RAPIER.ActiveEvents.COLLISION_EVENTS);
+      this.colliders.push(world.createCollider(desc, this.body));
+    }
     this.snapTo(bike);
+  }
+
+  /** Take the rider out of the simulation (while the ragdoll stands in) or put them back. */
+  setActive(active: boolean) {
+    this.body.setEnabled(active);
   }
 
   /** Place the rider exactly on the target pose, moving with the bike. */
@@ -129,7 +138,8 @@ export class Rider {
     _vr.subVectors(_pr, _rp);
     _vr.crossVectors(_rw, _vr).add(_rv);
     _err.subVectors(_pb, _pr).applyQuaternion(_bqInv);
-    if (_err.length() > MAX_STRETCH) _err.setLength(MAX_STRETCH);
+    this.stretch = _err.length();
+    if (this.stretch > MAX_STRETCH) _err.setLength(MAX_STRETCH);
     _errV.subVectors(_vb, _vr).applyQuaternion(_bqInv);
     _f.set(
       LIN_K.x * _err.x + LIN_C.x * _errV.x,

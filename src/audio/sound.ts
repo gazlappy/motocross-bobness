@@ -102,13 +102,14 @@ export class SoundSystem {
     const skidAmt = slip > 0.97 && speed > 3 ? Math.min(1, speed / 15) : 0;
     this.skid!.gain.gain.setTargetAtTime(0.12 * skidAmt, now, 0.04);
 
-    if (bike.landingImpact > 1.2) this.thud(Math.min(1, (bike.landingImpact - 1.2) / 6));
+    if (bike.landingImpact > 1.2) this.impact(Math.min(1, (bike.landingImpact - 1.2) / 6));
     bike.landingImpact = 0;
   }
 
-  /** A short low thump for landings, scaled by how hard the wheels hit. */
-  private thud(strength: number) {
-    const ctx = this.ctx!;
+  /** A short low thump for landings and crashes, 0..1. */
+  impact(strength: number) {
+    const ctx = this.ctx;
+    if (!ctx || !this.master || strength <= 0.02) return;
     const t = ctx.currentTime;
     const src = ctx.createBufferSource();
     src.buffer = this.noise!;

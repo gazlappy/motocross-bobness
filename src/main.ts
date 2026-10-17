@@ -2,8 +2,9 @@ import * as THREE from 'three';
 import RAPIER from '@dimforge/rapier3d-compat';
 import { generateHeightmap, sampleHeight } from './heightmap.ts';
 import { createTerrainCollider, createTerrainMesh } from './terrain.ts';
-import { Bike } from './bike.ts';
+import { Player } from './player.ts';
 import { BikeModel } from './bikeModel.ts';
+import { RiderModel } from './riderModel.ts';
 import { Input } from './input.ts';
 import { CameraRig } from './camera.ts';
 import { SoundSystem } from './audio/sound.ts';
@@ -50,9 +51,12 @@ world.timestep = PHYSICS_DT;
 createTerrainCollider(world, hm);
 
 SPAWN.y = sampleHeight(hm, SPAWN.x, SPAWN.z) + 1.0;
-const bike = new Bike(world, SPAWN, 0);
+const player = new Player(world, hm, SPAWN, 0);
+const bike = player.bike;
 const model = new BikeModel();
 scene.add(model.root);
+const riderModel = new RiderModel();
+scene.add(riderModel.root);
 
 const input = new Input();
 const rig = new CameraRig(camera, hm);
@@ -63,15 +67,17 @@ const hud = {
   gear: document.getElementById('gear')!,
   rpm: document.getElementById('rpm-fill')!,
   help: document.getElementById('help')!,
+  banner: document.getElementById('banner')!,
 };
 document.getElementById('loading')!.remove();
 
-function resetBike(toSpawn = false) {
-  const t = bike.body.translation();
-  const p = toSpawn ? SPAWN.clone() : new THREE.Vector3(t.x, 0, t.z);
-  p.y = sampleHeight(hm, p.x, p.z) + 1.0;
-  bike.reset(p, toSpawn ? 0 : bike.yaw);
-}
+player.onCrash = (cause) => {
+  sound.impact(1);
+  hud.banner.innerHTML = `WIPEOUT!<small>${cause}</small>`;
+  hud.banner.classList.add('show');
+};
+player.onRespawn = () => hud.banner.classList.remove('show');
+player.onImpact = (s) => sound.impact(s * 0.7);
 
 function addRocks() {
   let seed = 12345;
@@ -111,7 +117,7 @@ function frame(now: number) {
   last = now;
 
   for (const a of input.takeActions()) {
-    if (a === 'reset') resetBike();
+    if (a === 'reset') player.reset();
     else if (a === 'camera') rig.cycle();
     else if (a === 'shiftUp') { bike.autoShift = false; bike.shift(1); }
     else if (a === 'shiftDown') { bike.autoShift = false; bike.shift(-1); }
@@ -124,19 +130,18 @@ function frame(now: number) {
   accumulator += dt;
   let steps = 0;
   while (accumulator >= PHYSICS_DT && steps < MAX_STEPS_PER_FRAME) {
-    bike.step(controls, PHYSICS_DT);
-    world.step();
+    player.physicsStep(controls, PHYSICS_DT);
     accumulator -= PHYSICS_DT;
     steps++;
   }
   if (steps === MAX_STEPS_PER_FRAME) accumulator = 0;
 
-  const t = bike.body.translation();
-  if (bike.isUpsideDownLong || t.y < -50) resetBike(t.y < -50);
-
   model.update(bike);
+  riderModel.setPose(player.update(dt));
   sound.update(bike);
-  rig.update(bike, dt);
+  const focus = player.focus;
+  rig.update(bike, dt, focus);
+  const t = focus ?? bike.body.translation();
   sun.position.set(t.x, t.y, t.z).add(SUN_OFFSET);
   sun.target.position.set(t.x, t.y, t.z);
 
@@ -150,4 +155,4 @@ function frame(now: number) {
 requestAnimationFrame(frame);
 
 // Handy for poking at the sim from the dev console.
-Object.assign(window, { game: { bike, world, hm, rig, sound } });
+Object.assign(window, { game: { player, bike, world, hm, rig, sound } });
