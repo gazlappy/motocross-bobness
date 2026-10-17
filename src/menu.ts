@@ -669,7 +669,7 @@ export class Menu {
     const setup = el('div', 'setup');
     setup.append(this.segmented('Riding', ['easy', 'advanced'], st.controlScheme, (v) => this.set({ controlScheme: v as Settings['controlScheme'] })));
     setup.append(el('p', 'menu-foot controls-blurb', st.controlScheme === 'easy'
-      ? 'Easy: steer, gas and brake. Your rider levels the bike in the air for the landing and keeps the front down pulling away; gears are automatic. Lean by hand any time to take over.'
+      ? 'Easy: the lean is automatic. Just steer, gas and brake; your rider shifts their weight, the bike lands itself level, stays upright, straightens up for jumps, has traction control, forgives hard landings and shifts for you. Brake hard in a turn to slide the back end out.'
       : 'Advanced: the original controls. You shift the rider\'s weight: forward and back to control wheelies and set up landings, sideways in turns and in the air.'));
     setup.append(this.segmented('Device', ['keyboard', 'gamepad'], this.controlsTab, (v) => {
       this.stopCapture();

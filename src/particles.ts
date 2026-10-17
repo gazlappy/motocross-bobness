@@ -22,6 +22,8 @@ export interface DirtSource {
   wheels: readonly { attach: THREE.Vector3; rayLength: number; grounded?: boolean; slip?: number }[];
   speed: number;
   throttle: number;
+  /** Locked and sliding: a skid throws up much more dust. */
+  rearLocked?: boolean;
 }
 
 const WHEEL_RADIUS = 0.34;
@@ -227,8 +229,9 @@ export class DirtParticles {
         this.burst(_contact.x, groundY, _contact.z, v, hit);
       }
       s.airTime = 0;
-      // Dust trail: more the faster you go.
-      s.dust += dt * Math.max(0, speed - 2) * 2.4 * look.dustAmount;
+      // Dust trail: more the faster you go, and a thick cloud from a locked, sliding rear.
+      s.dust += dt * Math.max(0, speed - 2) * (b.rearLocked ? 7 : 2.4) * look.dustAmount;
+      if (b.rearLocked && speed > 3) s.clods += dt * speed * 1.5 * look.clodAmount;
       while (s.dust >= 1) {
         s.dust -= 1;
         this.dust.spawn(

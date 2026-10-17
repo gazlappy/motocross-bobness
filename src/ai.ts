@@ -59,6 +59,8 @@ export class AIDriver implements Driver {
 
   constructor(player: Player, track: Track, opts: AIOptions) {
     this.player = player;
+    // Braking on the edge of grip, never locking up and sliding.
+    player.bike.canLockRear = false;
     this.track = track;
     this.skill = opts.skill;
     this.homeLane = this.lane = opts.lane;

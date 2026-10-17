@@ -8,14 +8,15 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
-    "sim": "node scripts/creep-test.ts && node scripts/straight-test.ts && node scripts/turn-test.ts && node scripts/lean-test.ts && node scripts/sim-test.ts && node scripts/crash-test.ts && node scripts/stunt-test.ts && node scripts/career-test.ts && node scripts/race-test.ts 1",
+    "sim": "node scripts/creep-test.ts && node scripts/straight-test.ts && node scripts/turn-test.ts && node scripts/lean-test.ts && node scripts/sim-test.ts && node scripts/crash-test.ts && node scripts/stunt-test.ts && node scripts/brake-slide-test.ts && node scripts/career-test.ts && node scripts/race-test.ts 1",
     "check:heightfield": "node scripts/check-heightfield.ts",
     "render:engine": "node scripts/render-engine.ts",
     "race": "node scripts/race-test.ts 3",
     "jump-speeds": "node scripts/jump-speeds.ts",
     "race:sx": "node scripts/race-test.ts 2 supercross",
     "race:baja": "node scripts/race-test.ts 1 baja",
-    "bikes": "node scripts/bike-compare.ts"
+    "bikes": "node scripts/bike-compare.ts",
+    "novice": "node scripts/novice-test.ts 2"
   },
   "dependencies": {
     "@dimforge/rapier3d-compat": "^0.21.0",

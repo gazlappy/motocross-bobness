@@ -27,6 +27,8 @@ export class BajaDriver implements Driver {
 
   constructor(player: Player, race: BajaRace, racer: Racer, hm: Heightmap, skill: number, offset: number) {
     this.player = player;
+    // Braking on the edge of grip, never locking up and sliding.
+    player.bike.canLockRear = false;
     this.race = race;
     this.racer = racer;
     this.hm = hm;

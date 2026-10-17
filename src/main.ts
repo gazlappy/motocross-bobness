@@ -3,7 +3,6 @@ import RAPIER from '@dimforge/rapier3d-compat';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { Input } from './input.ts';
 import { loadBindings, keysText, padButtonName, padInputName } from './bindings.ts';
-import { easyAssist } from './assist.ts';
 import { CameraRig } from './camera.ts';
 import { SoundSystem } from './audio/sound.ts';
 import { Session, type SessionConfig } from './session.ts';
@@ -236,6 +235,7 @@ function attachHud() {
   if (!me) return;
   const p = me.player;
   p.bike.autoShift = settings.gearbox === 'auto' || settings.controlScheme === 'easy';
+  p.bike.assist = settings.controlScheme === 'easy';
   p.stunts.onTrick = (name, points) => {
     if (performance.now() < trickHoldUntil) return;
     showTrick(name ? `${name}<b>${Math.round(points).toLocaleString()}</b>` : '', false);
@@ -416,6 +416,7 @@ function applySettings(s: Settings) {
   hud.speedUnit.textContent = s.units === 'kmh' ? 'KM/H' : 'MPH';
   const me = session?.human;
   if (me) me.player.bike.autoShift = s.gearbox === 'auto' || s.controlScheme === 'easy';
+  if (me) me.player.bike.assist = s.controlScheme === 'easy';
   hud.help.innerHTML = helpHtml();
   if (me && rig && rig.mode !== s.camera) rig.setMode(s.camera);
 }
@@ -574,15 +575,9 @@ function frame(now: number) {
   if (running) {
     accumulator += dt;
     let steps = 0;
-    const easy = playing && settings.controlScheme === 'easy';
     while (accumulator >= PHYSICS_DT && steps < MAX_STEPS_PER_FRAME) {
       interp.record();
-      let c = playing ? mine : IDLE;
-      if (easy && me) {
-        c = { ...mine };
-        easyAssist(me.player.bike, c);
-      }
-      session.step(c, PHYSICS_DT);
+      session.step(playing ? mine : IDLE, PHYSICS_DT);
       accumulator -= PHYSICS_DT;
       steps++;
     }

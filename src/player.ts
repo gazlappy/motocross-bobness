@@ -107,6 +107,7 @@ export class Player {
     this.spawn = spawn.clone();
     this.spawnYaw = yaw;
     this.bike = new Bike(world, spawn, yaw, spec);
+    this.bike.groundHeight = (x, z) => sampleHeight(hm, x, z);
   }
 
   get crashed() {
@@ -216,7 +217,12 @@ export class Player {
     const riderHandles = bike.rider.colliders.map((c) => c.handle);
     for (const [h1, h2, started] of events.collisions) {
       if (!started || this.crashed) continue;
-      if (riderHandles.includes(h1) || riderHandles.includes(h2)) bike.crash('hit the dirt');
+      if (riderHandles.includes(h1) || riderHandles.includes(h2)) {
+        // Easy: a boot or knee brushing the ground isn't a crash until the bike is really going over.
+        const r = bike.body.rotation();
+        const upY = 1 - 2 * (r.x * r.x + r.z * r.z);
+        if (!bike.assist || upY < 0.55) bike.crash('hit the dirt');
+      }
       else if (h1 === bike.frame.handle || h2 === bike.frame.handle) {
         const r = bike.body.rotation();
         const upY = 1 - 2 * (r.x * r.x + r.z * r.z);

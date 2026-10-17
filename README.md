@@ -13,15 +13,23 @@ npm run race:baja  # the same, a Baja waypoint race
 npm run race -- nationals 250f  # args: laps, venue, bike (125, 250, 250f)
 npm run jump-speeds [supercross] [125]  # which approach speeds land each jump cleanly (tunes the AI)
 npm run bikes      # drag race and roll-on times for each bike
+npm run novice     # crashes per lap for a scripted beginner, Easy vs Advanced controls
+node scripts/brake-slide-test.ts  # brake mid-turn: the rear locks and kicks out the right way
 npm run sim        # headless checks (physics, crashes, stunts, career rules, a full race)
 ```
 
 Controls (defaults): **W** throttle, **S** brake, **A/D** steer, **↑/↓** lean forward/back, **←/→** lean sideways,
 **Q/E** shift (switches to manual), **M** auto/manual, **C** camera (chase/far/helmet/thrill), **R** reset (or skip a wipeout), **N** mute, **G** retro / realistic ground.
 Gamepad: RT/LT gas and brake, left stick steer, right stick lean, A/X stunts, Y reset, B camera, Start for the menu.
-**Options > Controls**: choose **Easy** (the rider shifts their own weight: levels the bike for landings, keeps the front
-down pulling away, automatic gears; lean by hand any time to take over) or **Advanced** (the original's full manual weight
-shift), and remap every key (main and alternate) and every gamepad stick, trigger and button (with invert). Saved in the browser.
+**Options > Controls**: choose **Easy** or **Advanced** (the original's full manual weight shift). In Easy the lean is automatic:
+you only steer, gas and brake (the lean keys just pick stunts). The rider shifts their own weight (into turns, forward
+pulling away, back under braking), and the bike helps: in the air it lines itself up with the slope it will land on and
+stays upright; it straightens up on jump faces, never leans past three quarters of the tyres' grip, has traction control
+and front ABS, holds itself up at walking pace, forgives harder landings and jolts, and shifts gears for you.
+
+Brakes: a hard brake (any brake on a keyboard) locks the rear wheel and slides it: turning right, the back end kicks out
+left, and the slide is held at an angle (about 33 degrees in Easy, about 49 in Advanced) until you let go. A gentle brake
+on a pad trigger stays on the edge of grip without sliding. Slides throw up a thick skid of dust. `npm run novice` measures it: a scripted beginner crashes about 9 times less often than on Advanced, and remap every key (main and alternate) and every gamepad stick, trigger and button (with invert). Saved in the browser.
 
 The game opens on a main menu over a live attract-mode race: **Career**, **Single Event** (Nationals, Supercross,
 Baja, Stunt Quarry or Free Ride, with laps, opponents, rival difficulty, session time, venue, bike and colour), **Options** (volume, units,

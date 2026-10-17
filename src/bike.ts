@@ -35,6 +35,16 @@ const GEARS = [2.9, 2.1, 1.62, 1.3, 1.08];
 
 const FRONT_BRAKE = 1700;
 const REAR_BRAKE = 850;
+/** Brake input that locks the rear wheel (a keyboard's brake key is always full). */
+const REAR_LOCK = 0.75;
+/** A locked tyre: sliding friction along it, and the share of its sideways grip it keeps. */
+const SLIDE_MU = 0.6 * TYRE_MU;
+const LOCKED_GRIP = 0.4;
+/** How far the back end steps out in a locked-rear slide (radians), and how firmly it's held there. */
+const SLIDE_ANGLE = 0.5;
+const EASY_SLIDE = 0.35;
+const SLIDE_KP = 30;
+const SLIDE_KD = 9;
 const DRAG_CDA = 0.55;
 const LEAN_KP = 140;
 const LEAN_KD = 35;
@@ -48,6 +58,12 @@ const CRASH_LANDING_ROLL = 1.05; // rad, landing leaned over this far
 const CRASH_STRETCH = 0.42; // m, rider ripped off the pegs
 const LANDING_MIN_AIR = 0.3; // s: shorter hops over bumps aren't judged as landings
 const MAX_LEAN = Math.atan(0.95 * TYRE_MU); // steepest lean the tyres can hold
+/** Easy controls: how much more a landing or a jolt can take before it's a crash. */
+const EASY_FORGIVENESS = 1.4;
+/** Easy controls: how much harder the rider can be jolted before being thrown off. */
+const EASY_GRIP = 1.8;
+/** Easy controls: the deepest lean asked for, as a fraction of the tyres' limit. */
+const EASY_LEAN = 0.75;
 
 function torqueAt(spec: BikeSpec, rpm: number) {
   const curve = spec.torqueCurve;
@@ -131,6 +147,18 @@ export class Bike {
   readonly frame: RAPIER.Collider;
   /** Set by the out-of-bounds cannon: the next landing's impact is forgiven. */
   cannonLanding = false;
+  /** Easy controls: the bike helps (steadier in the air, forgiving landings, traction control). */
+  assist = false;
+  /** Hard braking locks the rear and slides it (the AI keeps its brakes on the edge instead). */
+  canLockRear = true;
+  /** The rear wheel is locked and sliding. */
+  rearLocked = false;
+  private slidePrev: number | null = null;
+  /** Easy: where the rider puts their weight (x side, y forward), worked out each step. */
+  private autoLean = new THREE.Vector2();
+  brake = 0;
+  /** Ground height at (x, z), for the assist to see where a jump will land. */
+  groundHeight: ((x: number, z: number) => number) | null = null;
   lean = new THREE.Vector2(); // rider weight shift: x = side, y = forward
   private shiftCooldown = 0;
   private leanTarget = 0;
@@ -245,6 +273,7 @@ export class Bike {
     _angv.set(av.x, av.y, av.z);
 
     this.throttle = c.throttle;
+    this.brake = c.brake;
     this.speed = _linv.dot(_fwd);
     const absSpeed = Math.abs(this.speed);
 
@@ -252,6 +281,11 @@ export class Bike {
     const gripLimited = Math.atan((0.85 * TYRE_MU * GRAVITY * WHEELBASE) / Math.max(1, absSpeed * absSpeed));
     const maxSteer = Math.min(0.62, gripLimited);
     this.requestedSteer = c.steer * maxSteer;
+    // Easy: straighten up on a steep climb (a jump face), as a rider would before taking off.
+    if (this.assist && this.grounded) {
+      const climb = Math.asin(THREE.MathUtils.clamp(_fwd.y, -1, 1));
+      this.requestedSteer *= 1 - 0.85 * THREE.MathUtils.smoothstep(climb, 0.12, 0.3);
+    }
     // Above walking pace a bike turns because it leans: steer the front wheel to the angle the current
     // lean can hold, and let the steering input set the lean (see applyBalance). At a crawl, steer directly.
     const curRoll = -Math.asin(THREE.MathUtils.clamp(_right.y, -1, 1));
@@ -261,11 +295,15 @@ export class Bike {
       THREE.MathUtils.lerp(this.requestedSteer, leanSteer * Math.sign(this.speed || 1), byLean),
       -maxSteer, maxSteer,
     );
-    this.lean.x += (c.leanSide - this.lean.x) * Math.min(1, dt * 8);
-    this.lean.y += (c.leanForward - this.lean.y) * Math.min(1, dt * 8);
+    // Easy: the rider's weight shift is automatic (the lean keys only pick stunts).
+    const leanSide = this.assist ? this.autoLean.x : c.leanSide;
+    const leanForward = this.assist ? this.autoLean.y : c.leanForward;
+    if (this.assist) this.updateAutoLean(c, curRoll, absSpeed);
+    this.lean.x += (leanSide - this.lean.x) * Math.min(1, dt * 8);
+    this.lean.y += (leanForward - this.lean.y) * Math.min(1, dt * 8);
     if (!this.crashed) {
       this.rider.couple(body, this.lean, dt);
-      if (this.rider.stretch > CRASH_STRETCH) this.crash('thrown off');
+      if (this.rider.stretch > CRASH_STRETCH * (this.assist ? EASY_GRIP : 1)) this.crash('thrown off');
     }
 
     this.updateEngine(c, dt);
@@ -356,26 +394,66 @@ export class Bike {
       const stopJ = Math.abs(vLong) * mLong * 0.5; // impulse that would halve the rolling speed
 
       if (w.steered) {
-        jLong -= Math.sign(vLong) * Math.min(stopJ, FRONT_BRAKE * c.brake * dt);
+        // With the rear locked and sliding the front brake eases, so the bike slides rather than stops.
+        const front = this.rearLocked ? 0.3 : 1;
+        jLong -= Math.sign(vLong) * Math.min(stopJ, FRONT_BRAKE * front * c.brake * dt);
       } else {
         jLong += this.driveForce(c, vLong) * dt;
         jLong -= Math.sign(vLong) * Math.min(stopJ, REAR_BRAKE * c.brake * dt);
         // Walk the bike backwards when stopped and holding brake.
-        if (c.brake > 0.5 && c.throttle === 0 && vLong < 0.5) jLong -= 450 * dt;
+        if (c.brake > 0.5 && c.throttle === 0 && Math.abs(this.speed) < 0.5) jLong -= 450 * dt;
       }
       jLong -= Math.sign(vLong) * Math.min(stopJ, 0.02 * load * dt);
 
       const maxJ = TYRE_MU * load * dt;
-      const mag = Math.hypot(jLong, jLat);
-      w.slip = maxJ > 0 ? Math.min(1, mag / maxJ) : 1;
-      if (mag > maxJ && mag > 0) {
-        jLong *= maxJ / mag;
-        jLat *= maxJ / mag;
+      // Rear brake hard enough to lock the wheel: it slides, dragging with sliding friction and keeping
+      // only a little sideways grip, so the back end steps out of the turn (turning right, it kicks
+      // out left). Grip returns as the slide gets big: a lot in Easy, a little otherwise.
+      const locked = !w.steered && this.canLockRear && c.brake > REAR_LOCK && Math.abs(vLong) > 1.5;
+      if (!w.steered) this.rearLocked = locked;
+      if (locked) {
+        // A sliding tyre drags against its whole motion, sideways included: the rear drifts out until
+        // the drag's sideways share holds it on the turn, then holds that angle.
+        const vSlide = Math.hypot(vLong, vLat);
+        const drag = Math.min(SLIDE_MU * load * dt, vSlide * mLong * 0.5);
+        jLong = (-vLong / vSlide) * drag;
+        const slideLat = (-vLat / vSlide) * drag;
+        // Grip comes back as the slide gets big: a lot in Easy (it catches itself), a little otherwise.
+        const angle = Math.atan2(Math.abs(vLat), Math.abs(vLong));
+        const extra = this.assist
+          ? (1 - LOCKED_GRIP) * THREE.MathUtils.smoothstep(angle, 0.3, 0.55)
+          : (0.9 - LOCKED_GRIP) * THREE.MathUtils.smoothstep(angle, 0.5, 0.85);
+        const latMax = (LOCKED_GRIP + extra) * maxJ;
+        jLat = Math.abs(slideLat) >= Math.abs(jLat) ? slideLat : THREE.MathUtils.clamp(jLat, -latMax, latMax);
+        if (Math.abs(jLat) < Math.abs(slideLat)) jLat = slideLat;
+        w.slip = 1;
+      } else {
+        // Easy: ABS and traction control in one. Cornering grip comes first; brakes and drive only get
+        // what's left of the tyre, kept just short of sliding.
+        if (this.assist) {
+          const budget = Math.sqrt(Math.max(0, (0.92 * maxJ) ** 2 - jLat * jLat));
+          if (Math.abs(jLong) > budget) jLong = Math.sign(jLong) * budget;
+        }
+        const mag = Math.hypot(jLong, jLat);
+        w.slip = maxJ > 0 ? Math.min(1, mag / maxJ) : 1;
+        if (mag > maxJ && mag > 0) {
+          jLong *= maxJ / mag;
+          jLat *= maxJ / mag;
+        }
       }
-      _imp.copy(_wf).multiplyScalar(jLong).addScaledVector(_lat, jLat);
-      body.applyImpulseAtPoint(toR(_imp), toR(contact), true);
+      if (locked || (w.steered && this.rearLocked)) {
+        // In a slide the drag (rear and front) goes in line with the bike's centre of mass: applied at the
+        // leaned-over contact patch, it would twist the bike out of the turn. Sideways friction stays put.
+        const off = _v.subVectors(contact, _com).dot(_lat);
+        const inLine = _p.copy(contact).addScaledVector(_lat, -off);
+        body.applyImpulseAtPoint(toR(_imp.copy(_wf).multiplyScalar(jLong)), toR(inLine), true);
+        body.applyImpulseAtPoint(toR(_imp.copy(_lat).multiplyScalar(jLat)), toR(contact), true);
+      } else {
+        _imp.copy(_wf).multiplyScalar(jLong).addScaledVector(_lat, jLat);
+        body.applyImpulseAtPoint(toR(_imp), toR(contact), true);
+      }
 
-      w.spin += (vLong / WHEEL_RADIUS) * dt;
+      if (!locked) w.spin += (vLong / WHEEL_RADIUS) * dt;
     }
 
     this.grounded = groundedCount > 0;
@@ -400,10 +478,49 @@ export class Bike {
     const impact = -_linv.dot(n); // the bike's own speed into the ground, ignoring how it's rotating
     const pitch = Math.asin(THREE.MathUtils.clamp(_fwd.dot(n), -1, 1)); // + nose up
     const roll = Math.asin(THREE.MathUtils.clamp(_right.dot(n), -1, 1));
-    if (impact > CRASH_IMPACT && !this.cannonLanding) this.crash('cased it');
-    else if (w.steered && pitch < -CRASH_NOSE_DOWN) this.crash('over the bars');
-    else if (!w.steered && pitch > CRASH_LOOPED) this.crash('looped out');
-    else if (Math.abs(roll) > CRASH_LANDING_ROLL) this.crash('landed sideways');
+    const k = this.assist ? EASY_FORGIVENESS : 1;
+    if (impact > CRASH_IMPACT * k && !this.cannonLanding) this.crash('cased it');
+    else if (w.steered && pitch < -CRASH_NOSE_DOWN * k) this.crash('over the bars');
+    else if (!w.steered && pitch > CRASH_LOOPED * k) this.crash('looped out');
+    else if (Math.abs(roll) > CRASH_LANDING_ROLL * k) this.crash('landed sideways');
+  }
+
+  /**
+   * Easy: the slope (radians, + uphill along the heading) where the bike will come down, from its
+   * flight path. Falls back to the flight angle if it can't see the ground.
+   */
+  private landingSlope() {
+    const t = this.body.translation();
+    const flight = Math.atan2(_linv.y, Math.hypot(_linv.x, _linv.z));
+    const h = this.groundHeight;
+    if (!h) return flight * 0.5;
+    let x = t.x, y = t.y, z = t.z;
+    for (let i = 0; i < 60; i++) {
+      const dt = 0.05, ti = i * dt;
+      x = t.x + _linv.x * ti;
+      z = t.z + _linv.z * ti;
+      y = t.y + _linv.y * ti - 0.5 * GRAVITY * ti * ti;
+      if (y - 0.45 < h(x, z)) break;
+    }
+    const len = Math.hypot(_fwd.x, _fwd.z) || 1;
+    const dx = _fwd.x / len, dz = _fwd.z / len;
+    const slope = Math.atan2(h(x + dx, z + dz) - h(x - dx, z - dz), 2);
+    return THREE.MathUtils.clamp(slope, -0.6, 0.5);
+  }
+
+  /**
+   * Easy: a rider's instinctive weight shift. Into the turn with the bike; forward when driving hard
+   * from low speed (front down) and back under braking; centred in the air, where the bike lines
+   * itself up for the landing.
+   */
+  private updateAutoLean(c: Controls, roll: number, speed: number) {
+    if (!this.grounded) {
+      this.autoLean.set(0, 0);
+      return;
+    }
+    const side = THREE.MathUtils.clamp(roll / MAX_LEAN, -1, 1) * 0.35;
+    const drive = c.throttle * (1 - THREE.MathUtils.smoothstep(speed, 6, 14)) * 0.35;
+    this.autoLean.set(side, THREE.MathUtils.clamp(drive - c.brake * 0.4, -1, 1));
   }
 
   /** How far the nose is lifted off the ground (radians), 0 unless the rear wheel is down. */
@@ -416,9 +533,11 @@ export class Bike {
   private driveForce(c: Controls, vLong: number) {
     if (this.rpm >= this.spec.redline) return 0;
     // Feathering the throttle as the nose climbs, unless the rider is leaning back for a wheelie.
-    const limit = 0.18 + 0.27 * Math.max(0, -this.lean.y);
+    const limit = this.assist ? 0.1 : 0.18 + 0.27 * Math.max(0, -this.lean.y);
     const feather = 1 - 0.9 * THREE.MathUtils.smoothstep(this.wheelieAngle, limit, limit + 0.2);
-    const f = (torqueAt(this.spec, this.rpm) * c.throttle * feather * this.gearRatio * 0.9) / WHEEL_RADIUS;
+    // Easy: traction control eases the drive as the rear tyre reaches its grip limit.
+    const traction = this.assist ? 1 - 0.5 * THREE.MathUtils.smoothstep(this.wheels[1].slip, 0.85, 1) : 1;
+    const f = (torqueAt(this.spec, this.rpm) * c.throttle * feather * traction * this.gearRatio * 0.9) / WHEEL_RADIUS;
     // Ease off near zero speed so the bike creeps rather than lurches when the clutch bites.
     return vLong < -0.5 ? f * 0.3 : f;
   }
@@ -465,18 +584,53 @@ export class Bike {
       // Lean for the turn the rider is asking for (speed and steering), not the bike's actual yaw:
       // following actual yaw feeds a rear-wheel slide back into more lean.
       const turnLean = Math.atan2(this.speed * this.speed * Math.tan(this.requestedSteer), GRAVITY * WHEELBASE);
-      const desired = THREE.MathUtils.clamp(turnLean + this.lean.x * 0.2, -MAX_LEAN, MAX_LEAN);
+      // Easy: never ask for the last quarter of the tyres' grip; full lock on a keyboard stays safe.
+      const maxLean = this.assist ? MAX_LEAN * EASY_LEAN : MAX_LEAN;
+      const desired = THREE.MathUtils.clamp(turnLean + this.lean.x * 0.2, -maxLean, maxLean);
       // A rider can't throw the bike over instantly; snapping the target makes the wheels skip.
       this.leanTarget += THREE.MathUtils.clamp(desired - this.leanTarget, -LEAN_RATE * dt, LEAN_RATE * dt);
       const target = this.leanTarget;
       torque.addScaledVector(_fwd, INERTIA.z * (LEAN_KP * (target - roll) - LEAN_KD * rollRate));
+      // Rear locked: the rider holds the slide, the back end out of the turn by a set angle (turning
+      // right, it kicks out left), rather than letting it spin or snap back.
+      if (this.rearLocked && Math.abs(this.speed) > 2) {
+        const vx = _linv.x, vz = _linv.z;
+        const fl = Math.hypot(_fwd.x, _fwd.z) || 1;
+        const fx = _fwd.x / fl, fz = _fwd.z / fl;
+        const slide = Math.atan2(vx * fz - vz * fx, vx * fx + vz * fz); // + = nose right of travel
+        const target = Math.sign(roll || this.requestedSteer) * (this.assist ? EASY_SLIDE : SLIDE_ANGLE);
+        const rate = this.slidePrev === null ? 0 : (slide - this.slidePrev) / dt;
+        this.slidePrev = slide;
+        torque.addScaledVector(_up, -INERTIA.y * (SLIDE_KP * (target - slide) - SLIDE_KD * rate));
+      } else {
+        this.slidePrev = null;
+      }
+      // Easy: at walking pace (stalled on a face, rolling back) the rider dabs a foot and holds it up.
+      if (this.assist) {
+        const slow = 1 - THREE.MathUtils.smoothstep(Math.abs(this.speed), 1.5, 4);
+        if (slow > 0) torque.addScaledVector(_fwd, -INERTIA.z * slow * (60 * roll + 10 * rollRate));
+      }
       // A firm stop past the tyres' limit: the rider won't let it fold over.
       const over = Math.abs(roll) - MAX_LEAN - 0.05;
       if (over > 0) torque.addScaledVector(_fwd, -Math.sign(roll) * INERTIA.z * 400 * over);
       // Wheelie control: past a point the rider pulls the nose back down, unless leaning back for it.
       const nose = this.wheelieAngle;
-      const limit = 0.12 + 0.32 * Math.max(0, -this.lean.y) - 0.06 * Math.max(0, this.lean.y);
+      const limit = this.assist ? 0.08 : 0.12 + 0.32 * Math.max(0, -this.lean.y) - 0.06 * Math.max(0, this.lean.y);
       if (nose > limit) torque.addScaledVector(_right, -INERTIA.x * (70 * (nose - limit) + 6 * Math.max(0, pitchRate)));
+    } else if (this.assist) {
+      this.leanTarget = roll;
+      // Easy: the bike flies itself to land on both wheels, matched to the slope it will land on, and
+      // stays upright. The rider's lean still nudges it (for stunts and style).
+      const pitch = Math.asin(THREE.MathUtils.clamp(_fwd.y, -1, 1));
+      const target = this.landingSlope() + 0.35 * -this.lean.y;
+      torque.addScaledVector(_right, INERTIA.x * (14 * (target - pitch) - 5 * pitchRate));
+      torque.addScaledVector(_fwd, INERTIA.z * (4 * this.lean.x - 10 * roll - 4 * rollRate));
+      const yawRate = _angv.dot(_up);
+      torque.addScaledVector(_up, -INERTIA.y * (5 * yawRate + 1.5 * c.steer));
+      const fx = _fwd.x, fz = _fwd.z, vx = _linv.x, vz = _linv.z;
+      if (vx * vx + vz * vz > 25 && fx * fx + fz * fz > 0.1) {
+        torque.addScaledVector(_up, INERTIA.y * 3 * Math.atan2(fz * vx - fx * vz, fx * vx + fz * vz));
+      }
     } else {
       this.leanTarget = roll;
       // Mid-air: weight shift pitches and rolls the bike; throttle/brake torque the rear wheel.
