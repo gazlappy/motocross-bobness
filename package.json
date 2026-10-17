@@ -9,13 +9,15 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "sim": "node scripts/creep-test.ts && node scripts/straight-test.ts && node scripts/turn-test.ts && node scripts/lean-test.ts && node scripts/sim-test.ts",
-    "check:heightfield": "node scripts/check-heightfield.ts"
+    "check:heightfield": "node scripts/check-heightfield.ts",
+    "render:engine": "node scripts/render-engine.ts"
   },
   "dependencies": {
     "@dimforge/rapier3d-compat": "^0.21.0",
     "three": "^0.186.1"
   },
   "devDependencies": {
+    "@types/node": "^26.6.5",
     "@types/three": "^0.186.0",
     "typescript": "^7.0.2",
     "vite": "^8.3.4"

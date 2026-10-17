@@ -6,6 +6,7 @@ import { Bike } from './bike.ts';
 import { BikeModel } from './bikeModel.ts';
 import { Input } from './input.ts';
 import { CameraRig } from './camera.ts';
+import { SoundSystem } from './audio/sound.ts';
 
 const PHYSICS_DT = 1 / 120;
 const MAX_STEPS_PER_FRAME = 6;
@@ -55,6 +56,7 @@ scene.add(model.root);
 
 const input = new Input();
 const rig = new CameraRig(camera, hm);
+const sound = new SoundSystem();
 
 const hud = {
   speed: document.getElementById('speed-val')!,
@@ -115,6 +117,7 @@ function frame(now: number) {
     else if (a === 'shiftDown') { bike.autoShift = false; bike.shift(-1); }
     else if (a === 'toggleAuto') bike.autoShift = !bike.autoShift;
     else if (a === 'help') hud.help.hidden = !hud.help.hidden;
+    else if (a === 'mute') sound.toggleMute();
   }
 
   const controls = input.read(dt);
@@ -132,6 +135,7 @@ function frame(now: number) {
   if (bike.isUpsideDownLong || t.y < -50) resetBike(t.y < -50);
 
   model.update(bike);
+  sound.update(bike);
   rig.update(bike, dt);
   sun.position.set(t.x, t.y, t.z).add(SUN_OFFSET);
   sun.target.position.set(t.x, t.y, t.z);
@@ -146,4 +150,4 @@ function frame(now: number) {
 requestAnimationFrame(frame);
 
 // Handy for poking at the sim from the dev console.
-Object.assign(window, { game: { bike, world, hm, rig } });
+Object.assign(window, { game: { bike, world, hm, rig, sound } });

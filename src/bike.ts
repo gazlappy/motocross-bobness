@@ -106,6 +106,9 @@ export class Bike {
   speed = 0; // forward m/s
   grounded = false;
   airTime = 0;
+  throttle = 0;
+  /** Hardest wheel touchdown (m/s) since the sound system last read it. */
+  landingImpact = 0;
   lean = new THREE.Vector2(); // rider weight shift: x = side, y = forward
   private shiftCooldown = 0;
   private leanTarget = 0;
@@ -204,6 +207,7 @@ export class Bike {
     _linv.set(lv.x, lv.y, lv.z);
     _angv.set(av.x, av.y, av.z);
 
+    this.throttle = c.throttle;
     this.speed = _linv.dot(_fwd);
     const absSpeed = Math.abs(this.speed);
 
@@ -247,6 +251,7 @@ export class Bike {
       }
 
       groundedCount++;
+      const touchdown = !w.grounded;
       w.grounded = true;
       const dist = hit.time_of_impact + PROBE_RADIUS;
       w.rayLength = dist;
@@ -257,6 +262,7 @@ export class Bike {
       _v.subVectors(origin, _com);
       _v.crossVectors(_angv, _v).add(_linv);
       const compVel = -_v.dot(w.surfaceNormal) / Math.max(0.3, _up.dot(w.surfaceNormal));
+      if (touchdown) this.landingImpact = Math.max(this.landingImpact, compVel);
       w.compression = compression;
 
       let springF = SUSP_K * compression;

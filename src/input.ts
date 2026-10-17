@@ -6,7 +6,7 @@ export interface Controls {
   leanSide: number; // -1 (left) .. 1 (right)
 }
 
-type Action = 'reset' | 'camera' | 'shiftUp' | 'shiftDown' | 'toggleAuto' | 'help';
+type Action = 'reset' | 'camera' | 'shiftUp' | 'shiftDown' | 'toggleAuto' | 'help' | 'mute';
 
 const KEY_ACTIONS: Record<string, Action> = {
   KeyR: 'reset',
@@ -15,6 +15,7 @@ const KEY_ACTIONS: Record<string, Action> = {
   KeyQ: 'shiftDown',
   KeyM: 'toggleAuto',
   KeyH: 'help',
+  KeyN: 'mute',
 };
 
 // Standard gamepad mapping button indices.
