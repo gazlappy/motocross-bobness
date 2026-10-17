@@ -16,7 +16,7 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #9cc4e4; fon
 #rpm { margin-top: 8px; height: 10px; background: rgba(255, 255, 255, 0.15); border-radius: 5px; overflow: hidden; }
 #rpm-fill { height: 100%; width: 0; background: linear-gradient(90deg, var(--accent) 70%, var(--hot)); }
 #help {
-  position: fixed; left: 16px; top: 16px; padding: 8px 12px; border-radius: 6px; max-width: calc(100% - 32px);
+  position: fixed; left: 16px; bottom: 16px; padding: 8px 12px; border-radius: 6px; max-width: min(620px, calc(100% - 210px));
   background: var(--hud-bg); color: var(--hud-fg); font-size: 13px; line-height: 1.6; box-sizing: border-box;
 }
 #help b { color: var(--accent); }
@@ -141,3 +141,27 @@ body.menu-open:not(.menu-main) .menu-panel {
 .results-table td { padding: 4px 6px; text-align: left; border-top: 1px solid rgba(255, 255, 255, 0.08); }
 .results-table tr.me td { color: var(--accent); font-weight: bold; }
 #loading[hidden] { display: none; }
+
+.career-bar { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 14px; opacity: 0.9; }
+.career-bar b, .career-payout b { color: var(--accent); }
+.career-head { margin: 8px 0 0; font: bold italic 17px 'Trebuchet MS', Verdana, sans-serif; letter-spacing: 0.04em; }
+.career-events { margin: 0; padding-left: 22px; font-size: 14px; line-height: 1.7; }
+.career-events li { opacity: 0.55; }
+.career-events li.done { opacity: 0.85; }
+.career-events li.next { opacity: 1; color: var(--accent); font-weight: bold; }
+.career-events li span { display: inline-block; min-width: 170px; }
+.career-events em { font-style: normal; opacity: 0.85; }
+.career-note { margin: 4px 0; font-size: 14px; color: var(--hot); }
+.career-payout { font-size: 15px; line-height: 1.5; margin: 0 0 8px; }
+.career-payout p { margin: 0; }
+.bike-card {
+  display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; border-radius: 8px;
+  background: rgba(255, 255, 255, 0.06); border: 2px solid transparent; font-size: 13px;
+}
+.bike-card.selected { border-color: var(--accent); background: rgba(255, 176, 32, 0.14); }
+.bike-card b { font-size: 17px; font-style: italic; }
+.bike-card span { opacity: 0.75; }
+.bike-card .menu-btn:disabled { opacity: 0.45; cursor: default; }
+.bike-stat { display: flex; align-items: center; gap: 8px; }
+.bike-stat label { width: 52px; font-size: 12px; opacity: 0.7; }
+.bike-stat i { display: block; height: 6px; border-radius: 3px; background: var(--accent); }

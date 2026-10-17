@@ -7,6 +7,7 @@ import { Ragdoll } from './ragdoll.ts';
 import { StuntSystem } from './stunts.ts';
 import type { Track } from './track.ts';
 import { type BikeMounts, DEFAULT_PROPORTIONS, type RiderProportions, createPose, ridingPose } from './riderPose.ts';
+import type { BikeSpec } from './bikes.ts';
 
 // The player's bike and rider, including wipeouts: on a crash the rider becomes a ragdoll, the bike
 // tumbles on its own, and once everything has settled the player is put back where they crashed.
@@ -100,12 +101,12 @@ export class Player {
   private cannonCooldown = 0;
   private cannonTime = 0;
 
-  constructor(world: RAPIER.World, hm: Heightmap, spawn: THREE.Vector3, yaw = 0) {
+  constructor(world: RAPIER.World, hm: Heightmap, spawn: THREE.Vector3, yaw = 0, spec?: BikeSpec) {
     this.world = world;
     this.hm = hm;
     this.spawn = spawn.clone();
     this.spawnYaw = yaw;
-    this.bike = new Bike(world, spawn, yaw);
+    this.bike = new Bike(world, spawn, yaw, spec);
   }
 
   get crashed() {
@@ -255,8 +256,14 @@ export class Player {
     this.onCrash?.(cause);
   }
 
-  /** Per rendered frame: crash timing, respawn, and the rider pose to draw. */
+  /** Per rendered frame: crash timing and respawn, then the rider pose to draw. */
   update(dt: number) {
+    this.tick(dt);
+    return this.readPose();
+  }
+
+  /** Per rendered frame: crash timing and respawn. */
+  tick(dt: number) {
     const t = this.bike.body.translation();
     if (this.ragdoll) {
       const prev = this.crashTime;
@@ -270,6 +277,10 @@ export class Player {
     } else if (t.y < -50) {
       this.reset(true);
     }
+  }
+
+  /** The rider pose to draw, from wherever the bodies are now. */
+  readPose() {
     return this.ragdoll ? this.ragdoll.readPose(this.pose) : this.ridingPose();
   }
 

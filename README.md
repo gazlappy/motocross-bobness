@@ -10,15 +10,17 @@ npm run render:engine  # write engine-sound previews to audio-preview/*.wav
 npm run race       # headless 3-lap Nationals between seven AI riders (lap times, crashes)
 npm run race:sx    # the same, 2 laps of Supercross
 npm run race:baja  # the same, a Baja waypoint race
-npm run jump-speeds [supercross]  # which approach speeds land each jump cleanly (tunes the AI)
-npm run sim        # headless physics checks (standing still, cruising, turning, weight shift, full run)
+npm run race -- nationals 250f  # args: laps, venue, bike (125, 250, 250f)
+npm run jump-speeds [supercross] [125]  # which approach speeds land each jump cleanly (tunes the AI)
+npm run bikes      # drag race and roll-on times for each bike
+npm run sim        # headless checks (physics, crashes, stunts, career rules, a full race)
 ```
 
 Controls: **W** throttle, **S** brake, **A/D** steer, **↑/↓** lean forward/back, **←/→** lean sideways,
 **Q/E** shift (switches to manual), **M** auto/manual, **C** camera (chase/far/helmet/thrill), **R** reset (or skip a wipeout), **N** mute. Gamepad supported.
 
-The game opens on a main menu over a live attract-mode race: **Select Game** (Nationals, Supercross,
-Baja, Stunt Quarry or Free Ride, with laps, opponents, rival difficulty, session time, venue and your bike colour), **Options** (volume, units,
+The game opens on a main menu over a live attract-mode race: **Career**, **Single Event** (Nationals, Supercross,
+Baja, Stunt Quarry or Free Ride, with laps, opponents, rival difficulty, session time, venue, bike and colour), **Options** (volume, units,
 gearbox, camera, shadows, resolution, controls help; saved in the browser) and **Credits**.
 **Esc** (pad Start) pauses: resume, restart, options or quit to the menu.
 
@@ -35,6 +37,14 @@ The other venues:
 - **Stunt Quarry**: a sunken quarry full of kickers, mounds and a volcano. Score as many stunt points as
   you can in 1, 2 or 3 minutes; your best for each length is saved in the browser.
 - **Free Ride**: any of the four venues to yourself.
+
+Bikes: a 125cc two-stroke (light, peaky, needs revs), the 250cc two-stroke (hard-hitting) and a 250cc
+four-stroke (torque everywhere, lower top speed). Each has its own engine sound; four-strokes thump.
+
+Career: three series (Rookie on 125s, Pro and Champions Cup on 250s), each a six-event season against
+the same six rivals: Nationals, Supercross, Baja, a cash-only Stunt Quarry bonus, Supercross Main and the
+Nationals Final. Places score points (25-20-16-...) and prize money; the championship pays a bonus, and a top-three
+finish unlocks the next series. Spend winnings in the garage. Saved in the browser.
 
 Stunts (in the air): hold **Space** or **Shift** and pick the trick with the arrows (pad: A/X + right stick).
 Space: Superman, ↑ Cliffhanger, ↓ Heel Clicker, ←/→ Nac Nac. Shift: Double Can Can, ↑ Bar Hop, ↓ Splits,

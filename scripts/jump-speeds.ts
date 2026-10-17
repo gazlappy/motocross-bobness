@@ -7,10 +7,12 @@ import { rapierHeights, sampleHeight } from '../src/heightmap.ts';
 import { nationalsGround } from '../src/venues/nationals.ts';
 import { supercrossGround } from '../src/venues/supercross.ts';
 import { Player } from '../src/player.ts';
+import { BIKES, type BikeId } from '../src/bikes.ts';
 
 await RAPIER.init();
 // Usage: node scripts/jump-speeds.ts [nationals|supercross]
 const ground = process.argv[2] === 'supercross' ? supercrossGround() : nationalsGround();
+const spec = BIKES[(process.argv[3] ?? '250') as BikeId];
 const hm = ground.hm;
 const track = hm.track!;
 const DT = 1 / 120;
@@ -23,7 +25,7 @@ function attempt(jumpS: number, speed: number, groupEnd: number) {
   world.createCollider(RAPIER.ColliderDesc.heightfield(hm.cells, hm.cells, rapierHeights(hm), { x: hm.size, y: 1, z: hm.size }));
   for (const d of ground.extra ?? []) world.createCollider(d);
   const start = track.sample(jumpS - RUN_IN);
-  const p = new Player(world, hm, new THREE.Vector3(start.x, sampleHeight(hm, start.x, start.z) + 0.9, start.z), Math.atan2(-start.tx, -start.tz));
+  const p = new Player(world, hm, new THREE.Vector3(start.x, sampleHeight(hm, start.x, start.z) + 0.9, start.z), Math.atan2(-start.tx, -start.tz), spec);
   p.bike.body.setLinvel({ x: start.tx * speed, y: 0, z: start.tz * speed }, true);
   p.bike.rider.snapTo(p.bike.body);
   let crashed = '';

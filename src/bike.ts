@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { BIKES, type BikeSpec } from './bikes.ts';
 import RAPIER from '@dimforge/rapier3d-compat';
 import type { Controls } from './input.ts';
 import { GROUP_BIKE, GROUP_PROBE, GROUP_RAGDOLL, GROUP_WORLD, Rider, groups } from './rider.ts';
@@ -31,15 +32,6 @@ const TYRE_CROWN = 0.07; // m, radius of the tyre's cross-section
 const _side = new THREE.Vector3();
 
 const GEARS = [2.9, 2.1, 1.62, 1.3, 1.08];
-const FINAL_DRIVE = 10;
-const IDLE_RPM = 1600;
-const REDLINE = 11500;
-const SHIFT_UP_RPM = 10400;
-const SHIFT_DOWN_RPM = 5200;
-const PEAK_TORQUE = 38; // Nm at the crank: ~40 hp, a 250 two-stroke
-const TORQUE_CURVE: [number, number][] = [
-  [0, 0.4], [1600, 0.45], [4000, 0.68], [7000, 0.95], [8500, 1], [10500, 0.86], [11500, 0.6], [12500, 0],
-];
 
 const FRONT_BRAKE = 1700;
 const REAR_BRAKE = 850;
@@ -57,12 +49,13 @@ const CRASH_STRETCH = 0.42; // m, rider ripped off the pegs
 const LANDING_MIN_AIR = 0.3; // s: shorter hops over bumps aren't judged as landings
 const MAX_LEAN = Math.atan(0.95 * TYRE_MU); // steepest lean the tyres can hold
 
-function torqueAt(rpm: number) {
-  for (let i = 1; i < TORQUE_CURVE.length; i++) {
-    const [r1, t1] = TORQUE_CURVE[i];
+function torqueAt(spec: BikeSpec, rpm: number) {
+  const curve = spec.torqueCurve;
+  for (let i = 1; i < curve.length; i++) {
+    const [r1, t1] = curve[i];
     if (rpm <= r1) {
-      const [r0, t0] = TORQUE_CURVE[i - 1];
-      return PEAK_TORQUE * THREE.MathUtils.lerp(t0, t1, (rpm - r0) / (r1 - r0));
+      const [r0, t0] = curve[i - 1];
+      return spec.peakTorque * THREE.MathUtils.lerp(t0, t1, (rpm - r0) / (r1 - r0));
     }
   }
   return 0;
@@ -113,7 +106,8 @@ export class Bike {
   readonly body: RAPIER.RigidBody;
   readonly rider: Rider;
   readonly wheels: WheelState[];
-  rpm = IDLE_RPM;
+  readonly spec: BikeSpec;
+  rpm: number;
   gear = 0;
   autoShift = true;
   steerAngle = 0;
@@ -138,8 +132,10 @@ export class Bike {
   private probe = new RAPIER.Ball(PROBE_RADIUS);
   private world: RAPIER.World;
 
-  constructor(world: RAPIER.World, position: THREE.Vector3, yaw = 0) {
+  constructor(world: RAPIER.World, position: THREE.Vector3, yaw = 0, spec: BikeSpec = BIKES['250']) {
     this.world = world;
+    this.spec = spec;
+    this.rpm = spec.idle;
     const rot = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
     const desc = RAPIER.RigidBodyDesc.dynamic()
       .setTranslation(position.x, position.y, position.z)
@@ -178,11 +174,11 @@ export class Bike {
   }
 
   get gearRatio() {
-    return GEARS[this.gear] * FINAL_DRIVE;
+    return GEARS[this.gear] * this.spec.finalDrive;
   }
 
   get rpmFraction() {
-    return (this.rpm - IDLE_RPM) / (REDLINE - IDLE_RPM);
+    return (this.rpm - this.spec.idle) / (this.spec.redline - this.spec.idle);
   }
 
   shift(dir: 1 | -1) {
@@ -207,7 +203,7 @@ export class Bike {
     this.rider.snapTo(this.body);
     for (const w of this.wheels) w.grounded = false;
     this.gear = 0;
-    this.rpm = IDLE_RPM;
+    this.rpm = this.spec.idle;
     this.upsideDownTime = 0;
   }
 
@@ -411,11 +407,11 @@ export class Bike {
   }
 
   private driveForce(c: Controls, vLong: number) {
-    if (this.rpm >= REDLINE) return 0;
+    if (this.rpm >= this.spec.redline) return 0;
     // Feathering the throttle as the nose climbs, unless the rider is leaning back for a wheelie.
     const limit = 0.18 + 0.27 * Math.max(0, -this.lean.y);
     const feather = 1 - 0.9 * THREE.MathUtils.smoothstep(this.wheelieAngle, limit, limit + 0.2);
-    const f = (torqueAt(this.rpm) * c.throttle * feather * this.gearRatio * 0.9) / WHEEL_RADIUS;
+    const f = (torqueAt(this.spec, this.rpm) * c.throttle * feather * this.gearRatio * 0.9) / WHEEL_RADIUS;
     // Ease off near zero speed so the bike creeps rather than lurches when the clutch bites.
     return vLong < -0.5 ? f * 0.3 : f;
   }
@@ -423,25 +419,26 @@ export class Bike {
   private updateEngine(c: Controls, dt: number) {
     this.shiftCooldown = Math.max(0, this.shiftCooldown - dt);
     const rear = this.wheels[1];
+    const { idle, redline } = this.spec;
     let target: number;
     if (rear.grounded) {
       const wheelRpm = (Math.abs(this.speed) / WHEEL_RADIUS) * (30 / Math.PI);
       const locked = wheelRpm * this.gearRatio;
       // Below ~3000 rpm the clutch slips, letting the engine rev above road speed.
-      const slipRpm = IDLE_RPM + c.throttle * 4200;
-      target = Math.max(locked, Math.min(slipRpm, 3000 + locked * 0.5), IDLE_RPM);
+      const slipRpm = idle + c.throttle * 4200;
+      target = Math.max(locked, Math.min(slipRpm, 3000 + locked * 0.5), idle);
       // Wheelspin lets revs climb past road speed when the rear tyre is at its limit.
       if (rear.slip > 0.98 && c.throttle > 0) target = Math.max(target, locked + 1500 * c.throttle);
       this.rpm += (target - this.rpm) * Math.min(1, dt * 18);
     } else {
-      target = IDLE_RPM + c.throttle * (REDLINE + 300 - IDLE_RPM);
+      target = idle + c.throttle * (redline + 300 - idle);
       this.rpm += (target - this.rpm) * Math.min(1, dt * (c.throttle > 0 ? 6 : 3));
     }
-    this.rpm = THREE.MathUtils.clamp(this.rpm, IDLE_RPM, REDLINE + 200);
+    this.rpm = THREE.MathUtils.clamp(this.rpm, idle, redline + 200);
 
     if (this.autoShift && this.shiftCooldown === 0 && rear.grounded) {
-      if (this.rpm > SHIFT_UP_RPM && this.gear < GEARS.length - 1) this.shift(1);
-      else if (this.rpm < SHIFT_DOWN_RPM && this.gear > 0) this.shift(-1);
+      if (this.rpm > this.spec.shiftUp && this.gear < GEARS.length - 1) this.shift(1);
+      else if (this.rpm < this.spec.shiftDown && this.gear > 0) this.shift(-1);
     }
   }
 

@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import workletUrl from './engineWorklet.ts?worker&url';
 import type { Bike } from '../bike.ts';
 import type { EngineParams } from './engineWorklet.ts';
+import type { BikeSpec } from '../bikes.ts';
 
 // Game audio: the procedural engine plus wind, tyre roll, skid and landing thuds built from noise.
 // Browsers only allow audio after a user gesture, so the graph is built on the first key/click.
@@ -11,6 +12,7 @@ export interface EngineSource {
   position(): { x: number; y: number; z: number };
   rpm(): number;
   load(): number;
+  spec?: BikeSpec;
 }
 
 interface RemoteEngine {
@@ -18,6 +20,11 @@ interface RemoteEngine {
   node?: AudioWorkletNode;
   gain?: GainNode;
   pan?: StereoPannerNode;
+}
+
+/** The parts of a bike's spec that change how its engine sounds. */
+function engineVoice(spec?: BikeSpec) {
+  return spec ? { redline: spec.redline, idle: spec.idle, fourStroke: spec.fourStroke } : {};
 }
 
 const _camPos = new THREE.Vector3();
@@ -153,7 +160,7 @@ export class SoundSystem {
         r.pan = ctx.createStereoPanner();
         r.node.connect(r.gain).connect(r.pan).connect(this.master!);
       }
-      const params: EngineParams = { rpm: r.src.rpm(), load: r.src.load() };
+      const params: EngineParams = { rpm: r.src.rpm(), load: r.src.load(), ...engineVoice(r.src.spec) };
       r.node.port.postMessage(params);
       const p = r.src.position();
       _rel.set(p.x - _camPos.x, p.y - _camPos.y, p.z - _camPos.z);
@@ -186,7 +193,7 @@ export class SoundSystem {
       for (const layer of [this.wind!, this.tyre!, this.skid!]) layer.gain.gain.setTargetAtTime(0, now, 0.05);
       return;
     }
-    const params: EngineParams = { rpm: bike.rpm, load: bike.throttle };
+    const params: EngineParams = { rpm: bike.rpm, load: bike.throttle, ...engineVoice(bike.spec) };
     this.engine.port.postMessage(params);
 
     const v = bike.body.linvel();

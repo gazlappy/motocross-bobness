@@ -105,7 +105,10 @@ export class AIDriver implements Driver {
     for (const j of this.track.jumps) {
       const d = (((j.at - this.s) % L) + L) % L;
       if (d > LOOK_SPEED) continue;
-      target = Math.min(target, Math.sqrt(j.speed * j.speed + 2 * BRAKING * Math.max(0, d - 3)));
+      // Slow, technical sections (supercross rhythms, whoops): be at speed before committing at
+      // the first jump, then let each next jump set the pace.
+      const technical = j.speed < 12.5 && !this.track.jumps.some((o) => o !== j && j.at - o.at > 0 && j.at - o.at < 30);
+      target = Math.min(target, Math.sqrt(j.speed * j.speed + 2 * BRAKING * Math.max(0, d - (technical ? 18 : 3))));
     }
     if (bike.grounded) {
       c.throttle = v < target ? THREE.MathUtils.clamp((target - v) * 0.5 + 0.35, 0, 1) : 0;

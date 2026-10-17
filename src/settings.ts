@@ -1,6 +1,7 @@
 import type { CameraMode } from './camera.ts';
 import type { BikeColour } from './gltfBikeModel.ts';
 import type { VenueId } from './venue.ts';
+import type { BikeId } from './bikes.ts';
 
 // Player options and the last race setup, kept in the browser between visits. Storage can be
 // unavailable (private windows, blocked site data), so every read and write is best-effort.
@@ -25,6 +26,8 @@ export interface Settings {
   duration: number;
   /** Where Free Ride takes place. */
   freeVenue: VenueId;
+  /** Bike for single events (career has its own garage). */
+  bike: BikeId;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -42,6 +45,7 @@ export const DEFAULT_SETTINGS: Settings = {
   colour: 'red',
   duration: 120,
   freeVenue: 'nationals',
+  bike: '250',
 };
 
 const KEY = 'motocross-bobness:settings';

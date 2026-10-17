@@ -10,6 +10,9 @@ export class EngineDSP {
   /** Throttle opening / engine load, 0..1. */
   load = 0;
   redline = 11500;
+  idle = 1600;
+  /** Four-strokes fire every other revolution, with no expansion chamber: a deeper thump. */
+  fourStroke = false;
   gain = 0.5;
 
   private readonly sr: number;
@@ -78,9 +81,10 @@ export class EngineDSP {
       this.rpmS += (this.rpm - this.rpmS) * 0.003;
       this.loadS += (this.load - this.loadS) * 0.003;
       const rpm = this.rpmS, load = this.loadS;
-      const rev = Math.min(1, Math.max(0, (rpm - 1600) / (this.redline - 1600)));
+      const rev = Math.min(1, Math.max(0, (rpm - this.idle) / (this.redline - this.idle)));
+      const four = this.fourStroke;
 
-      this.phase += rpm / 60 / sr;
+      this.phase += rpm / 60 / sr / (four ? 2 : 1);
       if (this.phase >= 1) {
         this.phase -= 1;
         this.fire(rpm, load);
@@ -88,14 +92,14 @@ export class EngineDSP {
       this.tFire += 1 / sr;
 
       // Combustion pulse: instant attack, ~1 ms decay, part noise.
-      const env = this.amp * Math.exp(-this.tFire * (900 + 400 * rev));
+      const env = this.amp * (four ? 1.3 : 1) * Math.exp(-this.tFire * ((four ? 620 : 900) + 400 * rev));
       const exc = env * (0.5 + 0.5 * (this.rand() * 2 - 1));
 
       // Expansion chamber: tuned so it resonates hardest near peak power.
       const pipeLen = Math.min(pipeSize - 1, Math.floor(sr / (105 + rpm * 0.005)));
       const delayed = pipe[(this.pipeIdx - pipeLen + pipeSize) % pipeSize];
       this.pipeLp += (delayed - this.pipeLp) * 0.4;
-      const y = exc + 0.6 * this.pipeLp;
+      const y = exc + (four ? 0.38 : 0.6) * this.pipeLp;
       pipe[this.pipeIdx] = y;
       this.pipeIdx = (this.pipeIdx + 1) % pipeSize;
 
@@ -108,7 +112,7 @@ export class EngineDSP {
 
       // Drive harder with load, then a two-pole low-pass that opens with load and revs.
       let s = Math.tanh(z * (1.4 + 2.2 * load));
-      const fc = 900 + 1600 * rev + 4200 * load * (0.35 + 0.65 * rev);
+      const fc = (900 + 1600 * rev + 4200 * load * (0.35 + 0.65 * rev)) * (four ? 0.7 : 1);
       const a = 1 - Math.exp((-2 * Math.PI * fc) / sr);
       this.lp1 += a * (s - this.lp1);
       this.lp2 += a * (this.lp1 - this.lp2);

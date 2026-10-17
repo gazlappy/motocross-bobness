@@ -15,7 +15,7 @@ const ARENA_Z = 37;
 
 const jumps: Jump[] = [
   // Rhythm section on the second straight.
-  ...Array.from({ length: 6 }, (_, i) => ({ at: 90 + i * 10, up: 3, rise: 1.4, top: 0, down: 3, speed: 9 })),
+  ...Array.from({ length: 6 }, (_, i) => ({ at: 90 + i * 8, up: 3, rise: 1.4, top: 0, down: 3, speed: 9 })),
   // Back-to-back tabletops: forgiving if you come up short.
   { at: 198, up: 4, rise: 1.8, top: 9, down: 5, speed: 10 },
   { at: 228, up: 4, rise: 1.8, top: 6, down: 5, speed: 10 },

@@ -11,6 +11,8 @@ export interface EngineParams {
   rpm: number;
   load: number;
   redline?: number;
+  idle?: number;
+  fourStroke?: boolean;
   gain?: number;
 }
 
@@ -24,6 +26,8 @@ class EngineProcessor extends AudioWorkletProcessor {
       this.dsp.rpm = p.rpm;
       this.dsp.load = p.load;
       if (p.redline !== undefined) this.dsp.redline = p.redline;
+      if (p.idle !== undefined) this.dsp.idle = p.idle;
+      if (p.fourStroke !== undefined) this.dsp.fourStroke = p.fourStroke;
       if (p.gain !== undefined) this.dsp.gain = p.gain;
     };
   }

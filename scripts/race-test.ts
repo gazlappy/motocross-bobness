@@ -1,5 +1,5 @@
 // Seven AI riders race at a venue; reports finishing times, crashes and where they happened.
-// Usage: node scripts/race-test.ts [laps] [nationals|supercross|baja]
+// Usage: node scripts/race-test.ts [laps] [nationals|supercross|baja] [125|250|250f]
 import RAPIER from '@dimforge/rapier3d-compat';
 import { rapierHeights } from '../src/heightmap.ts';
 import { Player } from '../src/player.ts';
@@ -13,10 +13,12 @@ import type { Ground } from '../src/venue.ts';
 import { nationalsGround } from '../src/venues/nationals.ts';
 import { supercrossGround } from '../src/venues/supercross.ts';
 import { bajaGround } from '../src/venues/baja.ts';
+import { BIKES, type BikeId } from '../src/bikes.ts';
 
 await RAPIER.init();
 const laps = Number(process.argv[2] ?? 1);
 const venueId = process.argv[3] ?? 'nationals';
+const spec = BIKES[(process.argv[4] ?? '250') as BikeId];
 const ground: Ground = venueId === 'supercross' ? supercrossGround() : venueId === 'baja' ? bajaGround() : nationalsGround();
 const hm = ground.hm;
 const world = new RAPIER.World({ x: 0, y: -9.81, z: 0 });
@@ -32,7 +34,7 @@ const crashes = new Map<string, string[]>();
 const names = ['Red', 'Orange', 'Yellow', 'Green', 'Blue', 'White', 'Black'];
 names.forEach((name, i) => {
   const [pos, yaw] = ground.grid(i);
-  const player = new Player(world, hm, pos, yaw);
+  const player = new Player(world, hm, pos, yaw, spec);
   player.track = hm.track;
   player.cannonEnabled = venueId !== 'supercross';
   sim.players.push(player);
@@ -64,7 +66,7 @@ for (let i = 0; i < limit / DT; i++) {
   event.update(DT);
   if (event.racers.every((r) => r.finished)) break;
 }
-console.log(`\n${venueId}: simulated ${event.clock.toFixed(0)} s of racing in ${((performance.now() - t0) / 1000).toFixed(1)} s`);
+console.log(`\n${venueId} on ${spec.name}s: simulated ${event.clock.toFixed(0)} s of racing in ${((performance.now() - t0) / 1000).toFixed(1)} s`);
 for (const r of event.standings()) {
   const c = crashes.get(r.name)!;
   const status = r.finished ? `finished ${r.finishTime.toFixed(1)} s` : venueId === 'baja' ? `at waypoint ${r.nextCheckpoint + 1}` : `lap ${r.lap} at ${r.s.toFixed(0)} m`;

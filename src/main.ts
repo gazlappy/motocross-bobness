@@ -14,6 +14,8 @@ import { Race } from './race.ts';
 import { StuntChallenge } from './stuntChallenge.ts';
 import type { Venue, VenueId } from './venue.ts';
 import { buildVenue } from './venues/index.ts';
+import { PoseInterpolator } from './interpolation.ts';
+import { type EventPayout, SEASON, TIERS, eventConfig, loadCareer, money, recordEvent } from './career.ts';
 import bikeUrl from '../assets/models/Bike/mid_poly_dirt_bike.glb?url';
 import riderUrl from '../assets/models/Rider/low-poly_motocross_character_rigged.glb?url';
 
@@ -48,6 +50,7 @@ scene.add(sun, sun.target);
 
 const world = new RAPIER.World({ x: 0, y: -9.81, z: 0 });
 world.timestep = PHYSICS_DT;
+const interp = new PoseInterpolator(world);
 
 // The downloaded models, falling back to the box placeholders if either fails to load.
 const loader = new GLTFLoader();
@@ -170,6 +173,12 @@ const ATTRACT: SessionConfig = {
 };
 let session: Session;
 let lastConfig: SessionConfig = ATTRACT;
+const career = loadCareer();
+/** The game running is a career event: its result goes on the career. */
+let careerRun = false;
+let careerSummary = '';
+/** Under the countdown numbers: which career event this is. */
+let countdownCaption = '';
 let lastCount = -1;
 let resultsTimer = 0;
 
@@ -178,6 +187,7 @@ async function begin(config: SessionConfig) {
   session?.dispose();
   clearTimeout(resultsTimer);
   useVenue(await getVenue(config.venue));
+  interp.clear();
   session = new Session(deps, venue, config);
   lastCount = -1;
   hud.banner.classList.remove('show');
@@ -233,6 +243,11 @@ function attachHud() {
     };
   }
   event.onFinish = (r, place) => {
+    if (r.human && careerRun) {
+      careerRun = false;
+      const order = event instanceof StuntChallenge ? null : event.standings().map((x) => x.name);
+      careerSummary = payoutHtml(recordEvent(career, order, p.stunts.total));
+    }
     if (r.human) {
       const msg = event instanceof StuntChallenge
         ? `TIME UP!<small>${p.stunts.total.toLocaleString()} points${event.newBest ? ' · new best!' : ''}</small>`
@@ -241,13 +256,24 @@ function attachHud() {
       sound.cheer(1);
       resultsTimer = window.setTimeout(() => {
         const t = tableHtml(event.results());
-        menu.showResults(t.html, t.title);
+        menu.showResults(t.html + careerSummary, t.title, careerSummary !== '');
       }, 2700);
     } else if (menu.screenName === 'results') {
       const t = tableHtml(event.results());
-      menu.showResults(t.html, t.title);
+      menu.showResults(t.html + careerSummary, t.title, careerSummary !== '');
     }
   };
+}
+
+/** What a career event paid, shown under its results. */
+function payoutHtml(p: EventPayout) {
+  const lines = [p.place ? `${ordinal(p.place)} place: <b>+${p.points} pts</b> · <b>${money(p.cash)}</b>` : `Stunt bonus: <b>${money(p.cash)}</b>`];
+  if (p.final) {
+    lines.push(`Championship: <b>${ordinal(p.final.position)}</b>${p.final.bonus ? ` · bonus <b>${money(p.final.bonus)}</b>` : ''}`);
+    if (p.final.title) lines.push(`<b>${p.final.title.toUpperCase()}!</b>`);
+    if (p.final.unlocked) lines.push(`Unlocked: <b>${p.final.unlocked}</b>`);
+  }
+  return `<div class="career-payout">${lines.map((l) => `<p>${l}</p>`).join('')}<p>Bank: <b>${money(career.cash)}</b></p></div>`;
 }
 
 function updateEventHud() {
@@ -264,7 +290,7 @@ function updateEventHud() {
     const n = Math.ceil(-event.clock);
     if (n !== lastCount && n <= 3 && n >= 1) {
       lastCount = n;
-      flashBanner(`${n}`, 900);
+      flashBanner(`${n}${countdownCaption}`, 900);
       sound.impact(0.25);
     }
   } else if (lastCount !== 0) {
@@ -315,16 +341,37 @@ function applySettings(s: Settings) {
   if (me && rig && rig.mode !== s.camera) rig.setMode(s.camera);
 }
 
-const menu = new Menu(document.getElementById('menu')!, settings, {
+const menu = new Menu(document.getElementById('menu')!, settings, career, {
   start(config) {
+    careerRun = false;
+    careerSummary = '';
+    countdownCaption = '';
     lastConfig = config;
     void begin(config);
   },
+  careerEvent() {
+    careerSummary = '';
+    lastConfig = eventConfig(career);
+    const s = career.season!;
+    countdownCaption = `<small>${TIERS[s.tier].name} · ${SEASON[s.next].name} (${s.next + 1}/${SEASON.length})</small>`;
+    void begin(lastConfig).then(() => {
+      careerRun = true;
+    });
+  },
+  async toCareer() {
+    await begin(ATTRACT);
+    menu.showCareer();
+  },
   resume() {},
   restart() {
-    void begin(lastConfig);
+    // A career event restarted from the pause menu still counts; one already banked doesn't run again.
+    const wasCareer = careerRun;
+    void begin(lastConfig).then(() => {
+      careerRun = wasCareer;
+    });
   },
   quit() {
+    careerRun = false;
     void goToMenu();
   },
   settingsChanged: applySettings,
@@ -384,12 +431,16 @@ function frame(now: number) {
     accumulator += dt;
     let steps = 0;
     while (accumulator >= PHYSICS_DT && steps < MAX_STEPS_PER_FRAME) {
+      interp.record();
       session.step(playing ? mine : IDLE, PHYSICS_DT);
       accumulator -= PHYSICS_DT;
       steps++;
     }
     if (steps === MAX_STEPS_PER_FRAME) accumulator = 0;
-    session.render(dt);
+    session.tick(dt);
+    // Draw part way between the last two physics steps so motion is smooth at any refresh rate.
+    interp.apply(accumulator / PHYSICS_DT);
+    session.render();
   }
 
   const star = session.star;
@@ -407,9 +458,10 @@ function frame(now: number) {
   hud.gear.textContent = (bike.autoShift ? '' : 'M') + (bike.gear + 1);
   hud.rpm.style.width = `${Math.max(0, Math.min(1, bike.rpmFraction)) * 100}%`;
 
+  interp.restore();
   renderer.render(scene, camera);
 }
 requestAnimationFrame(frame);
 
 // Handy for poking at the sim from the dev console.
-Object.assign(window, { game: { get session() { return session; }, get venue() { return venue; }, world, rig: () => rig, sound, scene, menu, settings, venues } });
+Object.assign(window, { game: { get session() { return session; }, get venue() { return venue; }, world, interp, rig: () => rig, sound, scene, menu, settings, venues } });

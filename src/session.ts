@@ -18,6 +18,7 @@ import type { Controls } from './input.ts';
 import type { SoundSystem } from './audio/sound.ts';
 import type { Difficulty } from './settings.ts';
 import type { Venue, VenueId } from './venue.ts';
+import { BIKES, type BikeId, type BikeSpec } from './bikes.ts';
 
 // One game: the riders, their models and the event (if any) at a venue. Built when a game starts
 // and disposed when it ends, so the menu can switch games without reloading the page.
@@ -33,6 +34,11 @@ export interface SessionConfig {
   colour: BikeColour;
   /** Stunt Quarry session length, seconds. */
   duration: number;
+  /** Your bike (default the 250), and the rivals' (default the same as yours). */
+  bike?: BikeId;
+  rivalBike?: BikeId;
+  /** Career: exactly these rivals, in grid order. */
+  rivals?: string[];
 }
 
 export interface SessionDeps {
@@ -98,7 +104,11 @@ export class Session {
     if (config.mode === 'attract') this.event!.clock = 0;
 
     const human = config.mode !== 'attract';
-    const rivals = RIDERS.filter((r) => !human || r.colour !== config.colour);
+    const rivals = config.rivals
+      ? config.rivals.map((name) => RIDERS.find((r) => r.name === name)!).filter(Boolean)
+      : RIDERS.filter((r) => !human || r.colour !== config.colour);
+    const mine = BIKES[config.bike ?? '250'];
+    const theirs = BIKES[config.rivalBike ?? config.bike ?? '250'];
     const racing = config.mode === 'race' || config.mode === 'baja';
     const aiCount = config.mode === 'attract' ? 7 : racing ? Math.min(config.opponents, rivals.length) : 0;
     const skillScale = DIFFICULTY_SKILL[config.difficulty];
@@ -109,25 +119,25 @@ export class Session {
     const slots = human ? [mySlot, ...rest.slice(0, aiCount)] : rest.slice(0, aiCount);
 
     let slot = 0;
-    if (human) this.add('You', config.colour, null, null, slots[slot++]);
+    if (human) this.add('You', config.colour, null, null, slots[slot++], mine);
     rivals.slice(0, aiCount).forEach((r, i) => {
-      this.add(r.name, r.colour, r.kit, Math.min(1, r.skill * skillScale), slots[slot++], i);
+      this.add(r.name, r.colour, r.kit, Math.min(1, r.skill * skillScale), slots[slot++], theirs, i);
     });
     this.human = human ? this.entries[0] : null;
 
     for (const e of this.entries) {
       if (e.ai) {
         const b = e.player.bike;
-        deps.sound.addEngine({ position: () => b.body.translation(), rpm: () => b.rpm, load: () => b.throttle });
+        deps.sound.addEngine({ position: () => b.body.translation(), rpm: () => b.rpm, load: () => b.throttle, spec: b.spec });
       }
     }
   }
 
-  private add(name: string, colour: BikeColour, kit: number | null, skill: number | null, slot: number, index = 0) {
+  private add(name: string, colour: BikeColour, kit: number | null, skill: number | null, slot: number, spec: BikeSpec, index = 0) {
     const { world, scene, bikeGltf, riderGltf } = this.deps;
     const venue = this.venue;
     const [pos, yaw] = venue.grid(slot);
-    const player = new Player(world, venue.hm, pos, yaw);
+    const player = new Player(world, venue.hm, pos, yaw, spec);
     player.track = venue.hm.track;
     player.cannonEnabled = venue.cannon;
     this.sim.players.push(player);
@@ -189,11 +199,16 @@ export class Session {
     this.event?.update(dt);
   }
 
-  /** Per rendered frame: move the models to match the physics. */
-  render(dt: number) {
+  /** Per rendered frame, before drawing: crash timers and respawns. */
+  tick(dt: number) {
+    for (const e of this.entries) e.player.tick(dt);
+  }
+
+  /** Move the models to match the (interpolated) physics. */
+  render() {
     for (const e of this.entries) {
       e.bikeModel.update(e.player.bike);
-      e.riderModel.setPose(e.player.update(dt));
+      e.riderModel.setPose(e.player.readPose());
     }
   }
 
@@ -211,4 +226,9 @@ export class Session {
     }
     this.deps.sound.clearEngines();
   }
+}
+
+/** The six rivals who line up against you when you ride `colour`, in grid order. */
+export function rivalsFor(colour: BikeColour) {
+  return RIDERS.filter((r) => r.colour !== colour).slice(0, 6).map((r) => r.name);
 }
