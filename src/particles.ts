@@ -91,11 +91,14 @@ uniform float uGrow;
 uniform float uMaxPx;
 varying float vAge;
 varying float vShade;
+varying float vNear;
 #include <fog_pars_vertex>
 void main() {
   vAge = aAge;
   vShade = aShade;
   vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+  // Dust right at the camera fades out instead of filling the screen (and the GPU) with layers.
+  vNear = smoothstep(1.5, 6.0, -mvPosition.z);
   float size = aSize * (1.0 + uGrow * aAge);
   gl_PointSize = aAge >= 1.0 ? 0.0 : min(uMaxPx, size * uScale / -mvPosition.z);
   gl_Position = projectionMatrix * mvPosition;
@@ -107,13 +110,14 @@ uniform vec3 uColour;
 uniform float uOpacity;
 varying float vAge;
 varying float vShade;
+varying float vNear;
 #include <fog_pars_fragment>
 void main() {
   vec2 c = gl_PointCoord * 2.0 - 1.0;
   float r = dot(c, c);
   if (r > 1.0) discard;
   float fade = (1.0 - vAge) * (1.0 - vAge) * smoothstep(0.0, 0.08, vAge);
-  gl_FragColor = vec4(uColour * vShade, uOpacity * fade * (1.0 - r));
+  gl_FragColor = vec4(uColour * vShade, uOpacity * fade * (1.0 - r) * vNear);
   #include <fog_fragment>
 }`;
 
@@ -170,7 +174,7 @@ export class DirtParticles {
   private seed = 1;
 
   constructor() {
-    this.dustMat = material(dustFragment, { transparent: true, grow: 3.2, maxPx: 900 });
+    this.dustMat = material(dustFragment, { transparent: true, grow: 3.2, maxPx: 360 });
     this.clodMat = material(clodFragment, { transparent: false, grow: 0, maxPx: 22 });
     this.dust = new Pool(DUST_MAX, this.dustMat);
     this.clods = new Pool(CLOD_MAX, this.clodMat);

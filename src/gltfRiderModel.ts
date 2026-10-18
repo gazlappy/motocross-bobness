@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import type { RiderPose, RiderProportions } from './riderPose.ts';
 
 // The rigged "Low-poly Motocross Character" (see CREDITS.md), a Mixamo skeleton. Each frame its
@@ -25,6 +26,47 @@ const _m = new THREE.Matrix4();
 const _right = new THREE.Vector3();
 const _up = new THREE.Vector3();
 const _back = new THREE.Vector3();
+
+/**
+ * The rider comes as five skinned meshes on one skeleton, one per plain colour. Bake the colours
+ * into the vertices and draw them as one mesh: a field of eight riders then skins and draws once
+ * each instead of five times.
+ */
+function mergeParts(model: THREE.Object3D) {
+  const parts: THREE.SkinnedMesh[] = [];
+  model.traverse((o) => {
+    if ((o as THREE.SkinnedMesh).isSkinnedMesh) parts.push(o as THREE.SkinnedMesh);
+  });
+  const [first] = parts;
+  if (parts.length < 2) return;
+  const fits = parts.every((p) =>
+    p.parent === first.parent && p.matrix.equals(first.matrix) && p.bindMatrix.equals(first.bindMatrix) &&
+    !Array.isArray(p.material) && !(p.material as THREE.MeshStandardMaterial).map &&
+    p.skeleton.bones.length === first.skeleton.bones.length && p.skeleton.bones.every((b, i) => b === first.skeleton.bones[i]));
+  if (!fits) return;
+  const geometry = mergeGeometries(parts.map((p) => {
+    const g = p.geometry.clone();
+    const { r, g: green, b } = (p.material as THREE.MeshStandardMaterial).color;
+    const colours = new Float32Array(g.attributes.position.count * 3);
+    for (let i = 0; i < colours.length; i += 3) colours.set([r, green, b], i);
+    g.setAttribute('color', new THREE.BufferAttribute(colours, 3));
+    return g;
+  }));
+  if (!geometry) return;
+  const material = (first.material as THREE.MeshStandardMaterial).clone();
+  material.color.set(0xffffff);
+  material.vertexColors = true;
+  const mesh = new THREE.SkinnedMesh(geometry, material);
+  mesh.name = first.name;
+  mesh.position.copy(first.position);
+  mesh.quaternion.copy(first.quaternion);
+  mesh.scale.copy(first.scale);
+  mesh.castShadow = true;
+  mesh.frustumCulled = false;
+  first.parent!.add(mesh);
+  mesh.bind(first.skeleton, first.bindMatrix);
+  for (const p of parts) p.removeFromParent();
+}
 
 export class GltfRiderModel {
   readonly root = new THREE.Group();
@@ -63,6 +105,7 @@ export class GltfRiderModel {
         for (const [key, name] of Object.entries(BONES)) if (base === name) this.bones[key as BoneKey] = o as THREE.Bone;
       }
     });
+    mergeParts(model);
     for (const key of Object.keys(BONES) as BoneKey[]) {
       if (!this.bones[key]) throw new Error(`rider skeleton is missing bone ${BONES[key]}`);
     }

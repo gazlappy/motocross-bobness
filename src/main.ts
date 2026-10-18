@@ -26,6 +26,7 @@ import type { Racer } from './competition.ts';
 import bikeUrl from '../assets/models/Bike/mid_poly_dirt_bike.glb?url';
 import hondaUrl from '../assets/models/Bike/free_honda_crf_450_1k.glb?url';
 import riderUrl from '../assets/models/Rider/mx_rider.glb?url';
+import { PerfGraph } from './perfGraph.ts';
 
 const PHYSICS_DT = 1 / 120;
 const MAX_STEPS_PER_FRAME = 6;
@@ -529,6 +530,17 @@ await goToMenu();
 // ---- Main loop ------------------------------------------------------------------------------------
 
 const IDLE = { throttle: 0, brake: 0, steer: 0, leanForward: 0, leanSide: 0 };
+
+// ?perf in the address: record where each frame's time goes (window.perf), for hunting dropped frames.
+// GPU time comes from a timer query when the browser offers one.
+const PERF = new URLSearchParams(location.search).has('perf');
+interface FrameTiming { at: number; dt: number; steps: number; physics: number; logic: number; draw: number; gpu: number | null }
+const perfLog: FrameTiming[] = [];
+const gl = renderer.getContext() as WebGL2RenderingContext;
+const timerExt = PERF ? gl.getExtension('EXT_disjoint_timer_query_webgl2') : null;
+const pendingQueries: { query: WebGLQuery; entry: FrameTiming }[] = [];
+if (PERF) Object.assign(window, { perf: perfLog });
+const perfGraph = new PerfGraph(PERF);
 let accumulator = 0;
 let last = performance.now();
 let lastSnap = 0;
@@ -536,7 +548,10 @@ let lastTagSync = 0;
 
 function frame(now: number) {
   requestAnimationFrame(frame);
+  const t0 = PERF ? performance.now() : 0;
+  let t1 = 0, t2 = 0, perfSteps = 0;
   const dt = Math.min(0.1, (now - last) / 1000);
+  perfGraph.frame(now - last, now);
   last = now;
   if (!hud.loading.hidden) return; // a venue is being built
   const me = session.human;
@@ -582,6 +597,10 @@ function frame(now: number) {
       steps++;
     }
     if (steps === MAX_STEPS_PER_FRAME) accumulator = 0;
+    if (PERF) {
+      t1 = performance.now();
+      perfSteps = steps;
+    }
     session.tick(dt);
     dirt.update(dt, [...session.entries.map((e) => e.player.bike), ...session.remotes.map((r) => r.rider.bike)]);
     // Draw part way between the last two physics steps so motion is smooth at any refresh rate.
@@ -614,9 +633,31 @@ function frame(now: number) {
 
   interp.restore();
   dirt.setView(camera, renderer.domElement.height);
+  if (!PERF) {
+    renderer.render(scene, camera);
+    return;
+  }
+  t2 = performance.now();
+  const query = timerExt ? gl.createQuery() : null;
+  if (query) gl.beginQuery(timerExt!.TIME_ELAPSED_EXT, query);
   renderer.render(scene, camera);
+  if (query) gl.endQuery(timerExt!.TIME_ELAPSED_EXT);
+  const t3 = performance.now();
+  const entry: FrameTiming = {
+    at: now, dt: dt * 1000, steps: perfSteps,
+    physics: t1 ? t1 - t0 : 0, logic: t2 - (t1 || t0), draw: t3 - t2, gpu: null,
+  };
+  perfLog.push(entry);
+  if (perfLog.length > 3000) perfLog.shift();
+  if (query) pendingQueries.push({ query, entry });
+  // Collect GPU times that have arrived.
+  while (pendingQueries.length && gl.getQueryParameter(pendingQueries[0].query, gl.QUERY_RESULT_AVAILABLE)) {
+    const { query: q, entry: e } = pendingQueries.shift()!;
+    if (!gl.getParameter(timerExt!.GPU_DISJOINT_EXT)) e.gpu = gl.getQueryParameter(q, gl.QUERY_RESULT) / 1e6;
+    gl.deleteQuery(q);
+  }
 }
 requestAnimationFrame(frame);
 
 // Handy for poking at the sim from the dev console.
-Object.assign(window, { game: { get session() { return session; }, get venue() { return venue; }, world, interp, lobby, rig: () => rig, sound, scene, menu, settings, venues } });
+Object.assign(window, { game: { get session() { return session; }, get venue() { return venue; }, world, interp, lobby, rig: () => rig, sound, scene, menu, settings, venues, renderer } });

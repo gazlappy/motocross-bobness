@@ -5,6 +5,7 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import type { BikeView } from './bike.ts';
 import type { BikeColour } from './gltfBikeModel.ts';
 import { type BikeMounts, createMounts } from './riderPose.ts';
+import { bikeShadowProxy } from './shadowProxy.ts';
 
 // "(FREE) Honda CRF 450" by Jacobdesigns (see CREDITS.md). It comes rigged: bones for the steering
 // head, the fork slider, the swingarm and both wheels, plus hand and foot attach points. Physics
@@ -144,17 +145,23 @@ function prepare(gltf: GLTF) {
     return template!;
   };
   const batches = new Map<THREE.Object3D, Map<THREE.Material, THREE.BufferGeometry[]>>();
+  const add = (owner: THREE.Object3D, material: THREE.Material, geometry: THREE.BufferGeometry) => {
+    let byMaterial = batches.get(owner);
+    if (!byMaterial) batches.set(owner, (byMaterial = new Map()));
+    const list = byMaterial.get(material) ?? [];
+    list.push(geometry);
+    byMaterial.set(material, list);
+  };
   const merged: THREE.Mesh[] = [];
   template.traverse((o) => {
     const mesh = o as THREE.Mesh;
-    if (!mesh.isMesh || (mesh as THREE.SkinnedMesh).isSkinnedMesh || Array.isArray(mesh.material)) return;
-    const owner = ownerOf(mesh);
-    const toOwner = owner.matrixWorld.clone().invert().multiply(mesh.matrixWorld);
-    let byMaterial = batches.get(owner);
-    if (!byMaterial) batches.set(owner, (byMaterial = new Map()));
-    const list = byMaterial.get(mesh.material) ?? [];
-    list.push(mesh.geometry.clone().applyMatrix4(toOwner));
-    byMaterial.set(mesh.material, list);
+    if (!mesh.isMesh || Array.isArray(mesh.material)) return;
+    if ((mesh as THREE.SkinnedMesh).isSkinnedMesh) {
+      for (const [owner, geometry] of unskin(mesh as THREE.SkinnedMesh, (b) => (owners.includes(b) ? b : ownerOf(b)))) add(owner, mesh.material, geometry);
+    } else {
+      const toOwner = ownerOf(mesh).matrixWorld.clone().invert().multiply(mesh.matrixWorld);
+      add(ownerOf(mesh), mesh.material, mesh.geometry.clone().applyMatrix4(toOwner));
+    }
     merged.push(mesh);
   });
   for (const mesh of merged) mesh.removeFromParent();
@@ -176,6 +183,49 @@ function prepare(gltf: GLTF) {
   }
   prepared.set(gltf, template);
   return template;
+}
+
+/**
+ * The fenders and number plates are skinned, each vertex following either the frame or the bars.
+ * Split them into rigid pieces under whichever moving part their bone rides on, so nothing on the
+ * bike needs skinning every frame.
+ */
+function unskin(mesh: THREE.SkinnedMesh, ownerOf: (o: THREE.Object3D) => THREE.Object3D) {
+  const source = mesh.geometry.index ? mesh.geometry.toNonIndexed() : mesh.geometry;
+  const index = source.getAttribute('skinIndex'), weight = source.getAttribute('skinWeight');
+  const dominant = (v: number) => {
+    let best = 0;
+    for (let k = 1; k < 4; k++) if (weight.getComponent(v, k) > weight.getComponent(v, best)) best = k;
+    return index.getComponent(v, best);
+  };
+  const triangles = new Map<number, number[]>();
+  for (let v = 0; v < source.attributes.position.count; v += 3) {
+    const bone = dominant(v);
+    const list = triangles.get(bone) ?? [];
+    list.push(v);
+    triangles.set(bone, list);
+  }
+  const { bones, boneInverses } = mesh.skeleton;
+  const pieces: [THREE.Object3D, THREE.BufferGeometry][] = [];
+  for (const [b, starts] of triangles) {
+    const owner = ownerOf(bones[b]);
+    const geometry = new THREE.BufferGeometry();
+    for (const name of ['position', 'normal', 'uv']) {
+      const from = source.getAttribute(name);
+      if (!from) continue;
+      const out = new Float32Array(starts.length * 3 * from.itemSize);
+      starts.forEach((start, t) => {
+        for (let i = 0; i < 3 * from.itemSize; i++) out[t * 3 * from.itemSize + i] = from.array[start * from.itemSize + i];
+      });
+      geometry.setAttribute(name, new THREE.BufferAttribute(out, from.itemSize));
+    }
+    // Bind-pose skinning for one bone, then into the owner's space.
+    const toOwner = owner.matrixWorld.clone().invert()
+      .multiply(mesh.matrixWorld).multiply(mesh.bindMatrixInverse)
+      .multiply(bones[b].matrixWorld).multiply(boneInverses[b]).multiply(mesh.bindMatrix);
+    pieces.push([owner, geometry.applyMatrix4(toOwner)]);
+  }
+  return pieces;
 }
 
 /** A bone turned about a bike-space axis through its own origin. */
@@ -233,8 +283,8 @@ export class HondaBikeModel {
     model.traverse((o) => {
       const mesh = o as THREE.Mesh;
       if (!mesh.isMesh) return;
-      mesh.castShadow = mesh.receiveShadow = true;
-      if ((mesh as THREE.SkinnedMesh).isSkinnedMesh) mesh.frustumCulled = false;
+      mesh.castShadow = false; // the shadow proxy casts instead (see shadowProxy.ts)
+      mesh.receiveShadow = true;
       if (colour !== 'red') {
         const recolour = (m: THREE.Material) => {
           const std = m as THREE.MeshStandardMaterial;
@@ -260,7 +310,7 @@ export class HondaBikeModel {
     const mid = frontAxle.clone().add(rearAxle).multiplyScalar(0.5).applyQuaternion(fit.quaternion).multiplyScalar(fit.scale.x);
     fit.position.set(-mid.x, AXLE_REST_Y - mid.y, AXLE_MID_Z - mid.z);
     fit.add(model);
-    this.root.add(fit);
+    this.root.add(fit, bikeShadowProxy(AXLE_REST_Y));
     this.root.updateMatrixWorld(true);
     const bikePos = (o: THREE.Object3D) => this.root.worldToLocal(worldOf(o));
 
@@ -306,7 +356,7 @@ export class HondaBikeModel {
 
   /** Where the rider's hands and feet go, in bike space, for the current steering angle. */
   mounts(): BikeMounts {
-    this.root.updateMatrixWorld(true);
+    this.steerBone.updateWorldMatrix(true, false);
     const m = this.mountsOut;
     const toBike = (local: THREE.Vector3, out: THREE.Vector3) => this.root.worldToLocal(this.steerBone.localToWorld(out.copy(local)));
     toBike(this.gripsLocal[0], m.gripL);
