@@ -403,7 +403,7 @@ function helpHtml() {
     ? `${k('leanForward')}${k('leanBack')}${k('leanLeft')}${k('leanRight')} lean (optional: Easy controls lean for you)`
     : `${k('leanForward')}/${k('leanBack')} lean fwd/back &nbsp; ${k('leanLeft')}/${k('leanRight')} lean sideways`;
   return `${k('throttle')} throttle &nbsp; ${k('brake')} brake &nbsp; ${k('steerLeft')}/${k('steerRight')} steer &nbsp; ${lean} &nbsp; ` +
-    `${k('stunt1')}/${k('stunt2')} + lean keys: stunts (in the air) &nbsp; ${k('shiftDown')}/${k('shiftUp')} shift &nbsp; ${k('toggleAuto')} auto/manual &nbsp; ` +
+    `${k('stunt1')}/${k('stunt2')} + lean keys: 16 stunts (in the air; list in Options &gt; Controls) &nbsp; ${k('taunt')} taunt &nbsp; ${k('dumpster')} Big Kahuna Dumpster &nbsp; ${k('shiftDown')}/${k('shiftUp')} shift &nbsp; ${k('toggleAuto')} auto/manual &nbsp; ` +
     `${k('camera')} camera &nbsp; ${k('reset')} reset / skip wipeout &nbsp; ${k('mute')} mute &nbsp; ${k('toggleRetro')} retro look &nbsp; ${k('help')} hide help` +
     `<br />Gamepad: ${padInputName(pad.analog.throttle)} gas, ${padInputName(pad.analog.brake)} brake, ${padInputName(pad.analog.steer)} steer, ` +
     `${padInputName(pad.analog.leanFB)} / ${padInputName(pad.analog.leanLR)} lean, ${padButtonName(pad.buttons.stunt1)}/${padButtonName(pad.buttons.stunt2)} + lean: stunts, ` +
@@ -593,6 +593,8 @@ function frame(now: number) {
     else if (a === 'shiftDown') { bike.autoShift = false; bike.shift(-1); }
     else if (a === 'toggleAuto') bike.autoShift = !bike.autoShift;
     else if (a === 'help') hud.help.hidden = !hud.help.hidden;
+    else if (a === 'taunt') me.player.stunts.taunt();
+    else if (a === 'dumpster' && !me.player.crashed) me.player.stunts.dumpster();
   }
 
   const mine = input.read(dt);

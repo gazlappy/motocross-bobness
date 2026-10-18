@@ -5,7 +5,7 @@
 export type KeyAction =
   | 'throttle' | 'brake' | 'steerLeft' | 'steerRight'
   | 'leanForward' | 'leanBack' | 'leanLeft' | 'leanRight'
-  | 'stunt1' | 'stunt2'
+  | 'stunt1' | 'stunt2' | 'taunt' | 'dumpster'
   | 'shiftUp' | 'shiftDown' | 'toggleAuto' | 'reset' | 'camera' | 'help' | 'mute' | 'toggleRetro';
 
 export const KEY_ACTIONS: { id: KeyAction; label: string }[] = [
@@ -19,6 +19,8 @@ export const KEY_ACTIONS: { id: KeyAction; label: string }[] = [
   { id: 'leanRight', label: 'Lean right' },
   { id: 'stunt1', label: 'Stunt button 1' },
   { id: 'stunt2', label: 'Stunt button 2' },
+  { id: 'taunt', label: 'Taunt (point as you pass)' },
+  { id: 'dumpster', label: 'Big Kahuna Dumpster' },
   { id: 'shiftUp', label: 'Shift up' },
   { id: 'shiftDown', label: 'Shift down' },
   { id: 'toggleAuto', label: 'Auto / manual gears' },
@@ -35,7 +37,7 @@ export type PadInput =
   | { kind: 'axis'; index: number; invert: boolean };
 
 export type PadAnalog = 'throttle' | 'brake' | 'steer' | 'leanFB' | 'leanLR';
-export type PadButton = 'stunt1' | 'stunt2' | 'reset' | 'camera' | 'shiftUp' | 'shiftDown' | 'toggleAuto' | 'pause' | 'toggleRetro';
+export type PadButton = 'stunt1' | 'stunt2' | 'taunt' | 'dumpster' | 'reset' | 'camera' | 'shiftUp' | 'shiftDown' | 'toggleAuto' | 'pause' | 'toggleRetro';
 
 export const PAD_ANALOG: { id: PadAnalog; label: string; twoWay: boolean }[] = [
   { id: 'throttle', label: 'Throttle', twoWay: false },
@@ -48,6 +50,8 @@ export const PAD_ANALOG: { id: PadAnalog; label: string; twoWay: boolean }[] = [
 export const PAD_BUTTONS: { id: PadButton; label: string }[] = [
   { id: 'stunt1', label: 'Stunt button 1' },
   { id: 'stunt2', label: 'Stunt button 2' },
+  { id: 'taunt', label: 'Taunt (point as you pass)' },
+  { id: 'dumpster', label: 'Big Kahuna Dumpster' },
   { id: 'reset', label: 'Reset / skip wipeout' },
   { id: 'camera', label: 'Change camera' },
   { id: 'shiftUp', label: 'Shift up' },
@@ -71,7 +75,7 @@ export function defaultBindings(): Bindings {
     keys: {
       throttle: ['KeyW'], brake: ['KeyS'], steerLeft: ['KeyA'], steerRight: ['KeyD'],
       leanForward: ['ArrowUp'], leanBack: ['ArrowDown'], leanLeft: ['ArrowLeft'], leanRight: ['ArrowRight'],
-      stunt1: ['Space'], stunt2: ['ShiftLeft', 'ShiftRight'],
+      stunt1: ['Space'], stunt2: ['ShiftLeft', 'ShiftRight'], taunt: ['KeyT'], dumpster: ['Enter', 'NumpadEnter'],
       shiftUp: ['KeyE'], shiftDown: ['KeyQ'], toggleAuto: ['KeyM'], reset: ['KeyR'], camera: ['KeyC'], help: ['KeyH'], mute: ['KeyN'],
       toggleRetro: ['KeyG'],
     },
@@ -83,7 +87,7 @@ export function defaultBindings(): Bindings {
         leanFB: { kind: 'axis', index: 3, invert: true },
         leanLR: { kind: 'axis', index: 2, invert: false },
       },
-      buttons: { stunt1: 0, stunt2: 2, reset: 3, camera: 1, shiftUp: 5, shiftDown: 4, toggleAuto: null, pause: 9, toggleRetro: null },
+      buttons: { stunt1: 0, stunt2: 2, taunt: 12, dumpster: 13, reset: 3, camera: 1, shiftUp: 5, shiftDown: 4, toggleAuto: null, pause: 9, toggleRetro: null },
     },
   };
 }

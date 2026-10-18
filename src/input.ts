@@ -14,16 +14,18 @@ export interface Controls {
   leanByHand?: boolean;
 }
 
-export type StuntDir = 'none' | 'up' | 'down' | 'left' | 'right';
+/** A lean direction picking a stunt: forward is up, going round clockwise. */
+export type StuntDir = 'none' | 'up' | 'upRight' | 'right' | 'downRight' | 'down' | 'downLeft' | 'left' | 'upLeft';
+const DIRS: StuntDir[] = ['up', 'upRight', 'right', 'downRight', 'down', 'downLeft', 'left', 'upLeft'];
 
 function toDir(forward: number, side: number): StuntDir {
-  if (Math.abs(forward) < 0.4 && Math.abs(side) < 0.4) return 'none';
-  if (Math.abs(forward) >= Math.abs(side)) return forward > 0 ? 'up' : 'down';
-  return side > 0 ? 'right' : 'left';
+  if (Math.hypot(forward, side) < 0.4) return 'none';
+  const angle = Math.atan2(side, forward); // 0 = forward, clockwise
+  return DIRS[(Math.round(angle / (Math.PI / 4)) + 8) % 8];
 }
 
-export type Action = 'reset' | 'camera' | 'shiftUp' | 'shiftDown' | 'toggleAuto' | 'help' | 'mute' | 'pause' | 'toggleRetro';
-const ONE_SHOT: Action[] = ['reset', 'camera', 'shiftUp', 'shiftDown', 'toggleAuto', 'help', 'mute', 'toggleRetro'];
+export type Action = 'reset' | 'camera' | 'shiftUp' | 'shiftDown' | 'toggleAuto' | 'help' | 'mute' | 'pause' | 'toggleRetro' | 'taunt' | 'dumpster';
+const ONE_SHOT: Action[] = ['reset', 'camera', 'shiftUp', 'shiftDown', 'toggleAuto', 'help', 'mute', 'toggleRetro', 'taunt', 'dumpster'];
 
 const deadzone = (v: number, dz = 0.15) => (Math.abs(v) < dz ? 0 : (v - Math.sign(v) * dz) / (1 - dz));
 

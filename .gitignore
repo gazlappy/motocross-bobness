@@ -4,3 +4,8 @@ reference/
 audio-preview/
 assets/models/**/*.zip
 assets/models/**/*.usdz
+
+# Original game disc image: reference only, never committed.
+assets/Disc image/
+*.iso
+__pycache__/

@@ -168,8 +168,87 @@ Paid fallback if free recordings sound weak: Sonniss *TM 125 2018* pack (2-strok
 
 ---
 
-## 5. Still to find
-- The button combo for each stunt (look for the old "stunt guide" page or a GameFAQs FAQ).
-- Supercross and Enduro track names; full bike list per class.
-- Default control layout (keyboard and stick).
-- Should we get a copy of the original game (abandonware or the 1998 trial version) to play side by side and pull track heightmaps for reference?
+## 5. From the original disc (studied 2026-10-19)
+
+The user's own retail CD image was unpacked into `reference/` (git-ignored, as is the image) and
+read with the scripts in `tools/mcm-reference/`. Nothing from it ships; these are facts and
+measurements for matching the feel. Units in the game files are **feet** (the standing rider's
+pelvis sits 4.3 units above the ground, the head about 5.5).
+
+### What's on the disc
+| Files | What they are | Decoded? |
+|---|---|---|
+| `TERAFORM/*/*.SCN`, `WAYPOINT/*.RSC` | Plain-text scene setup: track name, terrain file, sky cube, sun, fog colour, crowd | Yes (text) |
+| `TERAFORM/*/*.DAT` | Track centreline: u32 count, then x, (unused), z, height (f32) and a point type (0/2/3) | Yes |
+| `TERAFORM/WAYPOINT/*.WPT` | Baja waypoints, plain text (`PointNX/Z`, look-at points) | Yes (text) |
+| `TERAFORM/*/*.TRN` | Terrain: palette, 64×64 tile map, 858 tiles of 16×16 heights + texture indices, 16 terrain textures 256×256 | Layout yes; the height tiles use a custom compression (not LZSS or LZW), so **heights and wall shapes are not decoded** |
+| `TERAFORM/*/*.TGA` | Menu preview picture of each track | Yes |
+| `SBIKE/*.VUB`, `RIDER.VUT`, `RIDER.MCF` | Motion-captured rider/bike animations: per frame, per bone two axis vectors + a position; the .MCF lists each motion's fps and length | Yes |
+| `MCM.EXE` | Stunt and event names | Strings only |
+| `LANG/USA/HELP/CONTENTS/*.HTM` | The game's manual: controls, stunts, events, garage, riding tips | Yes (text) |
+
+### Tracks vs ours
+Original Nationals tracks (from the .DAT centrelines):
+
+| Track | Lap | Fits in | Control-point height range |
+|---|---|---|---|
+| Flatlands (easy) | 685 m | 194×136 m | 2 m |
+| Sky Lane | 822 m | 194×151 m | 6 m |
+| Gold Rush | 901 m | 188×180 m | 53 m |
+| Pitfall | 1020 m | 188×201 m | 0 m |
+| Bela's Bluegrass | 1019 m | 196×175 m | 4 m |
+| Custer's Last Stand | 1095 m | 179×165 m | 0 m |
+| Terminal Velocity | 1149 m | 190×197 m | 9 m |
+| Desert Heat | 1162 m | 186×199 m | 34 m |
+| Augusta Park | 1175 m | 201×197 m | 14 m |
+| Claymore Hills | 1286 m | 196×203 m | 47 m |
+| Airborne Delivery | 1344 m | 193×192 m | 68 m |
+| Paradise Lost | 1387 m | 205×202 m | 4 m |
+| Dirt Devil | 1416 m | 187×194 m | 22 m |
+| Pressure Cooker | 1420 m | 199×194 m | 30 m |
+| **Ours (Nationals)** | **939 m** | **154×384 m** | **10 m** |
+
+- Every original track is packed into a ~200 m square in the middle of a big map, folding back on
+  itself with 40-75 degree bends every 10-20 m. Ours is stretched out (384 m long) and gentler.
+- Laps run 0.7-1.4 km; ours is at the short end.
+- Several tracks climb and drop 30-70 m over a lap (hillside tracks); ours varies 10 m. Point types
+  look like 2 = curve, 3 = straight, 0 = feature (jumps cluster there); not confirmed.
+- The menu previews show deep ruts, tall berms and rough hills right up to the track.
+
+### Walls and the off-track rule
+- Wall heights couldn't be read (compressed terrain). The previews show steep bowl sides.
+- Nationals: leave the track and you have **5 seconds** to rejoin where you left it, or you're put
+  back at the point you exited; a **green arrow** points the way. Supercross shows a yellow arrow
+  to the re-entry point. (Ours: 5 s, reset to the nearest safe point on the track, no arrow.)
+- Moto-Tag: tag-backs allowed after **5 seconds** (ours: 10 s). Tag was multiplayer-only.
+
+### Stunts
+16 stunts plus two extras, with the stunt keys as modifiers on the lean keys, like ours. Each key
+holds eight, one per lean direction going round (the manual's table repeats fwd+right and fwd+left,
+which look like misprints for back+right and back+left):
+- **Stunt key 1** + lean: Heel Clicker (fwd), Barney (fwd+right), Nac-Nac (right), Fender Bender
+  (back+right?), Superman (back), Stale Fish Saran-Wrap (back+left?), Split "X" (left), Cuffed (fwd+left).
+- **Stunt key 2** + lean: Bar Hop (fwd), Saran-Wrap (fwd+right), Twist (right), Splits (back+right?),
+  Skurfer (back), Tail Stand (back+left?), Double Can-Can (left), Cliff Hanger (fwd+left).
+- **Big Kahuna Dumpster** (its own key): a Skurfer, then the rider jumps off the bike, meant as a
+  victory jump after the finish. **Taunt** (point as you pass) has its own key too.
+- Animation lengths (how much air each needs): 1.0 s (Split "X") to 2.25 s (Big Kahuna); most
+  1.3-2.0 s. Quarry scoring rewards harder stunts and holding a stunt longer in the air.
+- Ours has 8 (Superman, Cliffhanger, Heel Clicker, Nac Nac, Double Can Can, Bar Hop, Splits,
+  Saran Wrap), each with a mirrored left version.
+
+### Bikes and garage
+- One bike, a 250 "thumper", tuned in a **garage**: three engine power curves (A: strong low end,
+  late peak; B: strong midrange that revs out fast; C: soft bottom, long top-end peak), front and
+  rear suspension from soft to stiff, and a tyre traction slider (less grip for hard pack, more
+  for soft ground). Our 125/250/250F/450 line-up is our own.
+
+### Handling (from the manual's riding tips)
+- In the air the brake drops the nose and the throttle drops the rear (ours does the same).
+- Gas with your weight back, or uphill, and you wheelie, loop it, or slide off the back.
+- Uphill: weight forward and centred. Downhill: weight back. After take-off on doubles: weight forward.
+- Uneven landings: weight slightly forward, then back. Level landings: centred.
+
+## 6. Still to find
+- Terrain heights (the .TRN tile compression), which would give the walls and hills exactly.
+- Supercross track layouts (the track editor's `.TRK`/`.TER` files are uncompressed and look decodable).

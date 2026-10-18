@@ -194,3 +194,7 @@ body.menu-open:not(.menu-main) .menu-panel {
 .bind-btn.on { background: var(--accent); color: #2a1d12; }
 .bind-btn.waiting { border-color: var(--accent); color: var(--accent); }
 .bind-btn:focus { outline: 2px solid var(--hud-fg); outline-offset: 1px; }
+.stunt-table table { width: 100%; border-collapse: collapse; font-size: 14px; margin: 10px 0 2px; }
+.stunt-table th { font-size: 12px; opacity: 0.7; text-align: left; padding: 2px 6px; }
+.stunt-table td { padding: 2px 6px; border-top: 1px solid rgba(255, 255, 255, 0.08); }
+.stunt-table .stunt-dir { width: 36px; text-align: center; font-size: 18px; color: var(--accent); }

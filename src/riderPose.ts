@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type { Bike } from './bike.ts';
 import { RIDER_POINTS } from './rider.ts';
-import type { StuntState } from './stunts.ts';
+import { type StuntState, TAUNT_HAND } from './stunts.ts';
 
 /**
  * The rider's skeleton as world-space joint positions plus head orientation. Riding, the pose comes
@@ -176,6 +176,8 @@ export function ridingPose(
       kneeHintR = _hintR.copy(KNEE_HINT_R).lerp(stunt.def.kneeHint, stunt.weight);
     }
   }
+  // Taunt: point as you pass, with the right hand off the bar.
+  if (stunt && stunt.taunt > 0) pose.handR.lerp(TAUNT_HAND, stunt.taunt);
   bend(pose.hipL, pose.footL, body.thigh, body.shin, kneeHintL, pose.kneeL);
   bend(pose.hipR, pose.footR, body.thigh, body.shin, kneeHintR, pose.kneeR);
   bend(pose.shoulderL, pose.handL, body.upperArm, body.foreArm, ELBOW_HINT_L, pose.elbowL);

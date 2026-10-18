@@ -13,7 +13,8 @@ import {
   type Bindings, KEY_ACTIONS, type KeyAction, PAD_ANALOG, PAD_BUTTONS, type PadAnalog, type PadButton,
   bindKey, bindPadButton, defaultBindings, keyName, padButtonName, padInputName, saveBindings, unbindKey,
 } from './bindings.ts';
-import { activePad } from './input.ts';
+import { type StuntDir, activePad } from './input.ts';
+import { STUNT_LIST } from './stunts.ts';
 
 // The front end: main menu over the attract-mode race, game select, options, credits, pause and
 // results. Plain DOM, driven by mouse, keyboard (arrows, Enter, Esc) or the gamepad's Start.
@@ -683,6 +684,7 @@ export class Menu {
       this.render();
     }));
     this.panel.append(setup);
+    this.panel.append(stuntTable(this.bindings));
 
     const table = el('div', 'bind-table');
     const b = this.bindings;
@@ -920,6 +922,24 @@ export class Menu {
       options[Math.max(0, Math.min(options.length - 1, j + (e.code === 'ArrowRight' ? 1 : -1)))]?.click();
     }
   }
+}
+
+const DIR_ARROW: Record<StuntDir, string> = {
+  none: '', up: '↑', upRight: '↗', right: '→', downRight: '↘', down: '↓', downLeft: '↙', left: '←', upLeft: '↖',
+};
+
+/** The sixteen stunts: hold a stunt button in the air and lean one of eight ways (forward = up). */
+function stuntTable(b: Bindings) {
+  const key = (a: 'stunt1' | 'stunt2') => b.keys[a].map(keyName).join('/') || 'unbound';
+  const rows = STUNT_LIST.filter((s) => s.button === 1).map((s) => {
+    const other = STUNT_LIST.find((t) => t.button === 2 && t.dir === s.dir)!;
+    return `<tr><td class="stunt-dir">${DIR_ARROW[s.dir]}</td><td>${s.name}</td><td>${other.name}</td></tr>`;
+  });
+  return el('div', 'stunt-table',
+    `<table><tr><th>Lean</th><th>${key('stunt1')} +</th><th>${key('stunt2')} +</th></tr>${rows.join('')}</table>` +
+    `<p class="menu-foot controls-blurb">In the air, hold a stunt button and lean to pick a stunt; hold it longer for more points, ` +
+    `and tuck back in before you land. ${b.keys.dumpster.map(keyName).join('/')}: Big Kahuna Dumpster (a Skurfer, then you leap off the bike: save it for after the finish). ` +
+    `${b.keys.taunt.map(keyName).join('/')}: taunt.</p>`);
 }
 
 function shortBike(id: BikeId) {

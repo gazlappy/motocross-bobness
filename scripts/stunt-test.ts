@@ -4,7 +4,7 @@ import * as THREE from 'three';
 import { generateHeightmap, rapierHeights, sampleHeight } from '../src/heightmap.ts';
 import { Player } from '../src/player.ts';
 import type { Controls, StuntDir } from '../src/input.ts';
-import { stuntFor } from '../src/stunts.ts';
+import { STUNT_LIST, stuntFor } from '../src/stunts.ts';
 import { POSE_JOINTS, createPose, ridingPose } from '../src/riderPose.ts';
 
 await RAPIER.init();
@@ -46,7 +46,7 @@ const check = (name: string, pass: boolean, detail: string) => {
     const t = b.body.translation();
     const high = t.y - sampleHeight(hm, t.x, t.z) > 3;
     const rising = b.body.linvel().y > -3;
-    return { ...idle, throttle: 1, stunt: !b.grounded && high && rising ? 1 : 0, stuntDir: 'none' as StuntDir };
+    return { ...idle, throttle: 1, stunt: !b.grounded && high && rising ? 1 : 0, stuntDir: 'down' as StuntDir };
   }, () => s.log.some((l) => l.includes('Superman')) || s.player.crashed);
   const banked = s.log.filter((l) => l.startsWith('banked'));
   check('clean Superman', banked.some((l) => l.includes('Superman')) && !s.log.some((l) => l.startsWith('crash')), s.log.join(', '));
@@ -55,7 +55,7 @@ const check = (name: string, pass: boolean, detail: string) => {
 // 2. Same, but held all the way to the ground: botched.
 {
   const s = setup();
-  s.run(9, () => ({ ...idle, throttle: 1, stunt: 1, stuntDir: 'none' as StuntDir }), () => s.player.crashed);
+  s.run(9, () => ({ ...idle, throttle: 1, stunt: 1, stuntDir: 'down' as StuntDir }), () => s.player.crashed);
   check('Superman held into the landing', s.log.some((l) => l.includes('botched the Superman')), s.log.join(', ') || 'no crash');
 }
 
@@ -83,19 +83,54 @@ const check = (name: string, pass: boolean, detail: string) => {
     `${s.log.join(', ')}; peak ${maxHeight.toFixed(0)} m, came down ${dist.toFixed(0)} m from the centre`);
 }
 
-// 4. Every trick pose is finite and keeps the rider's hands and feet within reach.
+// 4. All sixteen tricks, one per stunt button and lean direction, as in the original; every pose is
+// finite, and none is picked with no direction.
 {
   const s = setup();
   const pose = createPose();
   const bad: string[] = [];
-  for (const button of [1, 2] as const) {
-    for (const dir of ['none', 'up', 'down', 'left', 'right'] as StuntDir[]) {
-      const def = stuntFor(button, dir);
-      ridingPose(s.player.bike, pose, undefined, undefined, { def, weight: 1 });
-      if (POSE_JOINTS.some((j) => !Number.isFinite(pose[j].x + pose[j].y + pose[j].z))) bad.push(def.name);
-    }
+  const names = new Set<string>();
+  for (const { button, dir } of STUNT_LIST) {
+    const def = stuntFor(button, dir)!;
+    names.add(def.name);
+    ridingPose(s.player.bike, pose, undefined, undefined, { def, weight: 1, taunt: 1 });
+    if (POSE_JOINTS.some((j) => !Number.isFinite(pose[j].x + pose[j].y + pose[j].z))) bad.push(def.name);
   }
-  check('all 10 trick poses', bad.length === 0, bad.length ? `bad: ${bad.join(', ')}` : 'finite');
+  check('16 different tricks', names.size === 16 && STUNT_LIST.length === 16, [...names].join(', '));
+  check('all trick poses finite', bad.length === 0, bad.length ? `bad: ${bad.join(', ')}` : 'finite');
+  check('no trick without a direction', stuntFor(1, 'none') === null && stuntFor(2, 'none') === null, '');
+}
+
+// 5. Big Kahuna Dumpster: a Skurfer, then the rider leaps off (scores, then it's a wipeout).
+{
+  const s = setup();
+  s.run(2, () => ({ ...idle, throttle: 0.6 }));
+  s.player.stunts.dumpster();
+  s.run(3, () => idle, () => s.player.crashed);
+  check('Big Kahuna Dumpster', s.log.some((l) => l.includes('banked') && l.includes('Big Kahuna Dumpster')) && s.log.some((l) => l.includes('crash: Big Kahuna Dumpster')), s.log.join(', '));
+}
+
+// 6. Tail Stand hauls the nose up in the air.
+{
+  const pitch = (stuntDir: StuntDir) => {
+    const s = setup();
+    let most = -Infinity;
+    s.run(9, () => {
+      const b = s.player.bike;
+      const t = b.body.translation();
+      const high = t.y - sampleHeight(hm, t.x, t.z) > 3;
+      return { ...idle, throttle: 1, stunt: !b.grounded && high ? 2 : 0, stuntDir };
+    }, () => {
+      const b = s.player.bike;
+      const r = b.body.rotation();
+      const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(new THREE.Quaternion(r.x, r.y, r.z, r.w));
+      if (!b.grounded && s.player.stunts.state.weight > 0.9) most = Math.max(most, fwd.y);
+      return s.player.crashed;
+    });
+    return most;
+  };
+  const tail = pitch('downLeft'), skurfer = pitch('down');
+  check('Tail Stand pulls the nose up', tail > skurfer + 0.2, `nose height (sin of pitch) ${tail.toFixed(2)} vs ${skurfer.toFixed(2)} in a Skurfer`);
 }
 
 console.log(ok ? '\nAll stunt checks passed.' : '\nSome stunt checks FAILED.');
