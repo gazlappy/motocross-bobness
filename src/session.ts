@@ -108,8 +108,12 @@ const PLAYER_GRID_SLOT = 4;
 
 /** Held on the line until GO. */
 const HELD: Controls = { throttle: 0, brake: 1, steer: 0, leanForward: 0, leanSide: 0 };
+/** Attract mode: how long a new leader must lead before the camera switches to them. */
+const STAR_SWITCH_MS = 2000;
 
 export class Session {
+  private followed: Entry | null = null;
+  private challengerSince = 0;
   readonly config: SessionConfig;
   readonly venue: Venue;
   readonly sim: Sim;
@@ -323,11 +327,19 @@ export class Session {
     }
   }
 
-  /** Who the camera follows: you, or in attract mode whoever is leading. */
+  /**
+   * Who the camera follows: you, or in attract mode whoever is leading. A new leader takes the
+   * camera only after leading for a while, or two bikes side by side would flick it between them.
+   */
   get star(): Entry {
     if (this.human) return this.human;
     const leader = this.event?.standings()[0];
-    return this.entries.find((e) => e.racer === leader) ?? this.entries[0];
+    const now = performance.now();
+    const top = this.entries.find((e) => e.racer === leader) ?? this.entries[0];
+    if (!this.followed || !this.entries.includes(this.followed)) this.followed = top;
+    if (top === this.followed) this.challengerSince = now;
+    else if (now - this.challengerSince > STAR_SWITCH_MS) this.followed = top;
+    return this.followed;
   }
 
   dispose() {
