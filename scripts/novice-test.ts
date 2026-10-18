@@ -23,6 +23,7 @@ function ride(easy: boolean, keyboard: boolean, slot: number, deadband: number) 
   const [pos, yaw] = ground.grid(slot);
   const p = new Player(world, hm, pos, yaw);
   p.track = track;
+  p.keepOnCourse = true; // as in a race
   p.bike.assist = easy;
   p.bike.realistic = realistic;
   const causes: Record<string, number> = {};

@@ -23,8 +23,8 @@ export interface Tier {
 
 export const TIERS: Tier[] = [
   { name: 'Rookie Series', difficulty: 'easy', rivalBike: '125', eligible: ['125', '250', '250f'], purse: 1, extraLaps: 0 },
-  { name: 'Pro Series', difficulty: 'medium', rivalBike: '250', eligible: ['250', '250f'], purse: 2, extraLaps: 0 },
-  { name: 'Champions Cup', difficulty: 'hard', rivalBike: '250f', eligible: ['250', '250f'], purse: 3, extraLaps: 1 },
+  { name: 'Pro Series', difficulty: 'medium', rivalBike: '250', eligible: ['250', '250f', '450f'], purse: 2, extraLaps: 0 },
+  { name: 'Champions Cup', difficulty: 'hard', rivalBike: '250f', eligible: ['250', '250f', '450f'], purse: 3, extraLaps: 1 },
 ];
 
 export interface CareerEvent {

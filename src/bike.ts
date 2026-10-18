@@ -50,6 +50,10 @@ const EASY_SLIDE = 0.35;
 const SLIDE_KP = 30;
 const SLIDE_KD = 9;
 const DRAG_CDA = 0.55;
+/** Classic: extra rear grip on steep climbs (as a share of normal grip), from and to these slopes (sin). */
+const CLIMB_GRIP = 0.9;
+const CLIMB_GRIP_FROM = Math.sin(0.35);
+const CLIMB_GRIP_FULL = Math.sin(0.85);
 const LEAN_KP = 140;
 const LEAN_KD = 35;
 const LEAN_RATE = 2.5; // rad/s
@@ -471,7 +475,10 @@ export class Bike {
       }
       jLong -= Math.sign(vLong) * Math.min(stopJ, 0.02 * load * dt);
 
-      const maxJ = TYRE_MU * load * dt;
+      // Classic: on a steep climb the rear knobblies dig in for more drive, so the bowl walls can be
+      // ridden up as in the original (a real tyre would spin out on them).
+      const climb = !w.steered && !this.realistic ? THREE.MathUtils.smoothstep(_fwd.y, CLIMB_GRIP_FROM, CLIMB_GRIP_FULL) : 0;
+      const maxJ = TYRE_MU * (1 + CLIMB_GRIP * climb) * load * dt;
       // Rear brake hard enough to lock the wheel: it slides, dragging with sliding friction and keeping
       // only a little sideways grip, so the back end steps out of the turn (turning right, it kicks
       // out left). Grip returns as the slide gets big: a lot in Easy, a little otherwise.
@@ -611,7 +618,7 @@ export class Bike {
 
   /**
    * Easy: a rider's instinctive weight shift. Into the turn with the bike; forward when driving hard
-   * from low speed (front down) and back under braking; centred in the air, where the bike lines
+   * from low speed or up a steep climb (front down) and back under braking; centred in the air, where the bike lines
    * itself up for the landing.
    */
   private updateAutoLean(c: Controls, roll: number, speed: number) {
@@ -621,7 +628,9 @@ export class Bike {
     }
     const side = THREE.MathUtils.clamp(roll / MAX_LEAN, -1, 1) * 0.35;
     const drive = c.throttle * (1 - THREE.MathUtils.smoothstep(speed, 6, 14)) * 0.35;
-    this.autoLean.set(side, THREE.MathUtils.clamp(drive - c.brake * 0.4, -1, 1));
+    // Up a steep wall, right over the bars to keep the front down.
+    const climb = c.throttle * THREE.MathUtils.smoothstep(_fwd.y, Math.sin(0.3), Math.sin(0.7));
+    this.autoLean.set(side, THREE.MathUtils.clamp(Math.max(drive, climb) - c.brake * 0.4, -1, 1));
   }
 
   /** How far the nose is lifted off the ground (radians), 0 unless the rear wheel is down. */
@@ -663,9 +672,12 @@ export class Bike {
     }
     this.rpm = THREE.MathUtils.clamp(this.rpm, idle, redline + 200);
 
+    // Shift on road speed, not engine revs: wheelspin and clutch slip rev the engine, which would
+    // hold a tall gear while the bike bogs down on a climb.
     if (this.autoShift && this.shiftCooldown === 0 && rear.grounded) {
-      if (this.rpm > this.spec.shiftUp && this.gear < GEARS.length - 1) this.shift(1);
-      else if (this.rpm < this.spec.shiftDown && this.gear > 0) this.shift(-1);
+      const roadRpm = (Math.abs(this.speed) / WHEEL_RADIUS) * (30 / Math.PI) * this.gearRatio;
+      if (roadRpm > this.spec.shiftUp && this.gear < GEARS.length - 1) this.shift(1);
+      else if (roadRpm < this.spec.shiftDown && this.gear > 0) this.shift(-1);
     }
   }
 

@@ -1,7 +1,8 @@
-// The bikes you can ride, as in the original: 125cc and 250cc two-strokes and a 250cc four-stroke.
-// They share a chassis; the engines differ (torque curve, revs, gearing and sound).
+// The bikes you can ride, as in the original: 125cc and 250cc two-strokes and a 250cc four-stroke,
+// plus a 450cc four-stroke (the Honda the model is of). They share a chassis; the engines differ
+// (torque curve, revs, gearing and sound).
 
-export type BikeId = '125' | '250' | '250f';
+export type BikeId = '125' | '250' | '250f' | '450f';
 
 export interface BikeSpec {
   id: BikeId;
@@ -62,6 +63,20 @@ export const BIKES: Record<BikeId, BikeSpec> = {
     shiftUp: 9900,
     shiftDown: 4500,
     finalDrive: 9.8,
+    fourStroke: true,
+  },
+  '450f': {
+    id: '450f',
+    name: '450cc four-stroke',
+    blurb: 'The big thumper. Brutal torque, the top speed to match, and enough to blast up the bowl walls.',
+    price: 25000,
+    peakTorque: 60,
+    torqueCurve: [[0, 0.58], [1400, 0.66], [3000, 0.84], [5000, 0.97], [6500, 1], [8500, 0.9], [9800, 0.66], [10800, 0]],
+    idle: 1400,
+    redline: 10200,
+    shiftUp: 9400,
+    shiftDown: 4300,
+    finalDrive: 7.4,
     fourStroke: true,
   },
 };
