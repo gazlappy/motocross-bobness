@@ -2,6 +2,8 @@
 
 A browser remake of Motocross Madness (1998). See [RESEARCH.md](RESEARCH.md) for reference material and the plan.
 
+**Play it: https://gazlappy.github.io/motocross-bobness/** (built and published by GitHub Actions on every push to `master`; see `.github/workflows/deploy.yml`).
+
 ```bash
 npm install
 npm run dev        # http://localhost:5173
