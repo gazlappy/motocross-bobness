@@ -74,7 +74,7 @@ export function quarryGround(): Ground {
       return h;
     },
     // High banks all round: ride up them for air, or over the top for the cannon.
-    edgeWall: { height: 48, width: 85, plateau: EDGE_PLATEAU },
+    edgeWall: { height: 40, width: 85, plateau: EDGE_PLATEAU },
     track: null,
     trackBlend: 0,
     flats: [{ x: 0, z: 0, r: 30 }],

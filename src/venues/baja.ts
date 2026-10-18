@@ -72,7 +72,7 @@ export function bajaGround(): Ground {
       h += noise.fbm(x / 15, z / 15, 2) * 0.5;
       return h;
     },
-    edgeWall: { height: 70, width: 80, plateau: EDGE_PLATEAU },
+    edgeWall: { height: 56, width: 80, plateau: EDGE_PLATEAU },
     track: null,
     trackBlend: 0,
     flats,

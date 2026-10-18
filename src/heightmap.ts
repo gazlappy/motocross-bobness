@@ -156,7 +156,7 @@ export function nationalsTerrain(track = new Track()): TerrainDef {
       noise.fbm(x / 230, z / 230, 5) * 34 +
       Math.max(0, noise.fbm(x / 95 + 13.1, z / 95 - 4.2, 4)) * 18 +
       noise.fbm(x / 18, z / 18, 2) * 0.5,
-    edgeWall: { height: 55, width: 60, plateau: EDGE_PLATEAU },
+    edgeWall: { height: 44, width: 60, plateau: EDGE_PLATEAU },
     track,
     trackBlend: 90,
   };
