@@ -548,7 +548,7 @@ let lastTagSync = 0;
 
 function frame(now: number) {
   requestAnimationFrame(frame);
-  const t0 = PERF ? performance.now() : 0;
+  const t0 = performance.now();
   let t1 = 0, t2 = 0, perfSteps = 0;
   const dt = Math.min(0.1, (now - last) / 1000);
   perfGraph.frame(now - last, now);
@@ -597,10 +597,8 @@ function frame(now: number) {
       steps++;
     }
     if (steps === MAX_STEPS_PER_FRAME) accumulator = 0;
-    if (PERF) {
-      t1 = performance.now();
-      perfSteps = steps;
-    }
+    t1 = performance.now();
+    perfSteps = steps;
     session.tick(dt);
     dirt.update(dt, [...session.entries.map((e) => e.player.bike), ...session.remotes.map((r) => r.rider.bike)]);
     // Draw part way between the last two physics steps so motion is smooth at any refresh rate.
@@ -633,16 +631,14 @@ function frame(now: number) {
 
   interp.restore();
   dirt.setView(camera, renderer.domElement.height);
-  if (!PERF) {
-    renderer.render(scene, camera);
-    return;
-  }
   t2 = performance.now();
   const query = timerExt ? gl.createQuery() : null;
   if (query) gl.beginQuery(timerExt!.TIME_ELAPSED_EXT, query);
   renderer.render(scene, camera);
   if (query) gl.endQuery(timerExt!.TIME_ELAPSED_EXT);
   const t3 = performance.now();
+  perfGraph.work(t1 ? t1 - t0 : 0, t2 - (t1 || t0), t3 - t2);
+  if (!PERF) return;
   const entry: FrameTiming = {
     at: now, dt: dt * 1000, steps: perfSteps,
     physics: t1 ? t1 - t0 : 0, logic: t2 - (t1 || t0), draw: t3 - t2, gpu: null,
