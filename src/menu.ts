@@ -671,6 +671,11 @@ export class Menu {
     setup.append(el('p', 'menu-foot controls-blurb', st.controlScheme === 'easy'
       ? 'Easy: the lean is automatic. Just steer, gas and brake; your rider shifts their weight, the bike lands itself level, stays upright, straightens up for jumps, has traction control, forgives hard landings and shifts for you. Brake hard in a turn to slide the back end out.'
       : 'Advanced: the original controls. You shift the rider\'s weight: forward and back to control wheelies and set up landings, sideways in turns and in the air.'));
+    setup.append(this.segmented('Handling', ['classic', 'realistic'], st.handling, (v) => this.set({ handling: v as Settings['handling'] })));
+    setup.append(el('p', 'menu-foot controls-blurb', st.handling === 'classic'
+      ? 'Classic: the arcade bike. Grippy tyres and a bike that flies itself steady.'
+      : 'Realistic: loose dirt. The tyres break away and slide; gas it in a turn and the back end steps out (the rider countersteers to hold it), close the throttle and the engine brakes. In the air, rev the engine to lift the nose and tap the brake to drop it.' +
+        (st.controlScheme === 'advanced' ? ' Overdo it and you\'ll wash out the front or spin.' : '')));
     setup.append(this.segmented('Device', ['keyboard', 'gamepad'], this.controlsTab, (v) => {
       this.stopCapture();
       this.controlsTab = v as 'keyboard' | 'gamepad';

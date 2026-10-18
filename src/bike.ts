@@ -69,6 +69,23 @@ const EASY_GRIP = 1.8;
 /** Easy controls: the deepest lean asked for, as a fraction of the tyres' limit. */
 const EASY_LEAN = 0.75;
 
+// Realistic handling (the classic, arcade-tuned model is the default).
+/** Knobblies on dirt: peak grip, and what's left once a tyre has broken loose. */
+const REAL_MU = 0.95;
+const REAL_SLIDE_MU = 0.8;
+const REAL_MAX_LEAN = Math.atan(0.95 * REAL_MU);
+/** How fast the rider can lay the bike over (rad/s), slower at speed as the wheels' gyro resists. */
+const REAL_LEAN_RATE = 2.1;
+/** Engine braking off the throttle at full revs, newtons at the rear tyre. */
+const ENGINE_BRAKE = 520;
+/** How far the back end can step out before the rider runs out of countersteer (radians). */
+const POWERSLIDE_MAX = 0.7;
+const EASY_POWERSLIDE_MAX = 0.4;
+/** Back end this far out at speed is a spin; the front sliding sideways this far, this long, is a wash-out. */
+const SPIN_OUT = 1.25;
+const WASH_OUT_ANGLE = 0.2;
+const WASH_OUT_TIME = 0.5;
+
 function torqueAt(spec: BikeSpec, rpm: number) {
   const curve = spec.torqueCurve;
   for (let i = 1; i < curve.length; i++) {
@@ -90,6 +107,7 @@ export interface WheelState {
   spin: number; // visual rotation angle
   surfaceNormal: THREE.Vector3;
   slip: number; // 0..1, how close the tyre is to its grip limit
+  sliding: boolean; // realistic handling: broken loose, on sliding grip until it hooks up again
 }
 
 const _v = new THREE.Vector3();
@@ -154,6 +172,15 @@ export class Bike {
   cannonLanding = false;
   /** Easy controls: the bike helps (steadier in the air, forgiving landings, traction control). */
   assist = false;
+  /**
+   * Realistic handling: loose dirt grip that breaks away, power slides held with countersteer, engine
+   * braking, a slower lean, and air control from the throttle and rear brake rather than an autopilot.
+   */
+  realistic = false;
+  /** Realistic: how far the back end is out (radians, + = tail out to the right) and how long the front has slid. */
+  private tailOut = 0;
+  private tailOutPrev = 0;
+  private frontWash = 0;
   /** Hard braking locks the rear and slides it (the AI keeps its brakes on the edge instead). */
   canLockRear = true;
   /** The rear wheel is locked and sliding. */
@@ -221,6 +248,7 @@ export class Bike {
       spin: 0,
       surfaceNormal: new THREE.Vector3(0, 1, 0),
       slip: 0,
+      sliding: false,
     });
     this.wheels = [wheel(-0.82, true), wheel(0.66, false)];
   }
@@ -300,7 +328,8 @@ export class Bike {
     const absSpeed = Math.abs(this.speed);
 
     // Steering lock narrows with speed so the turn never asks for more grip than the tyres have.
-    const gripLimited = Math.atan((0.85 * TYRE_MU * GRAVITY * WHEELBASE) / Math.max(1, absSpeed * absSpeed));
+    const mu = this.realistic ? REAL_MU : TYRE_MU;
+    const gripLimited = Math.atan((0.85 * mu * GRAVITY * WHEELBASE) / Math.max(1, absSpeed * absSpeed));
     const maxSteer = Math.min(0.62, gripLimited);
     this.requestedSteer = c.steer * maxSteer;
     // Easy: straighten up on a steep climb (a jump face), as a rider would before taking off.
@@ -317,6 +346,11 @@ export class Bike {
       THREE.MathUtils.lerp(this.requestedSteer, leanSteer * Math.sign(this.speed || 1), byLean),
       -maxSteer, maxSteer,
     );
+    // Realistic: with the back end out, the rider points the front where the bike is going (countersteer).
+    if (this.realistic && this.grounded && absSpeed > 3) {
+      const counter = THREE.MathUtils.smoothstep(Math.abs(this.tailOut), 0.05, 0.2) * this.tailOut * 0.9;
+      this.steerAngle = THREE.MathUtils.clamp(this.steerAngle + counter, -0.62, 0.62);
+    }
     // Easy: the rider's weight shift is automatic (the lean keys only pick stunts).
     const leanSide = this.assist ? this.autoLean.x : c.leanSide;
     const leanForward = this.assist ? this.autoLean.y : c.leanForward;
@@ -346,7 +380,11 @@ export class Bike {
       let compression = -1;
       let cosLean = 1;
       if (hit) {
-        w.surfaceNormal.set(hit.normal1.x, hit.normal1.y, hit.normal1.z);
+        // A sweep catching a triangle edge can report a near-sideways normal, and pushing along it kicks
+        // the bike sideways. No rideable ground is that steep: keep the last good normal instead.
+        const n = hit.normal1;
+        if (n.y >= 0.5) w.surfaceNormal.set(n.x, n.y, n.z);
+        else if (!w.grounded) w.surfaceNormal.set(0, 1, 0);
         const height = (hit.time_of_impact + PROBE_RADIUS) * w.surfaceNormal.y; // attach point above the ground plane
         cosLean = THREE.MathUtils.clamp(_up.dot(w.surfaceNormal), 0.25, 1);
         const centreToGround = (WHEEL_RADIUS - TYRE_CROWN) * cosLean + TYRE_CROWN;
@@ -358,6 +396,7 @@ export class Bike {
         w.compression = 0;
         w.rayLength += (maxLen - w.rayLength) * Math.min(1, dt * 20);
         w.slip = 0;
+        w.sliding = false;
         if (!w.steered) w.spin += ((this.rpm / this.gearRatio) * (Math.PI / 30)) * dt * c.throttle;
         continue;
       }
@@ -423,6 +462,10 @@ export class Bike {
       } else {
         jLong += this.driveForce(c, vLong) * dt;
         jLong -= Math.sign(vLong) * Math.min(stopJ, REAR_BRAKE * c.brake * dt);
+        // Realistic: closing the throttle, the engine holds the bike back (harder at high revs).
+        if (this.realistic && c.throttle < 0.05 && c.brake < REAR_LOCK && absSpeed > 2) {
+          jLong -= Math.sign(vLong) * Math.min(stopJ, ENGINE_BRAKE * Math.max(0, this.rpmFraction) * dt);
+        }
         // Walk the bike backwards when stopped and holding brake.
         if (c.brake > 0.5 && c.throttle === 0 && Math.abs(this.speed) < 0.5) jLong -= 450 * dt;
       }
@@ -450,6 +493,32 @@ export class Bike {
         jLat = Math.abs(slideLat) >= Math.abs(jLat) ? slideLat : THREE.MathUtils.clamp(jLat, -latMax, latMax);
         if (Math.abs(jLat) < Math.abs(slideLat)) jLat = slideLat;
         w.slip = 1;
+      } else if (this.realistic) {
+        // Loose dirt: grip holds up to its peak, then the tyre breaks loose and slides on less until
+        // the rider asks for well under that again. A spinning rear gives drive first and what's left
+        // of its grip sideways, so the back end steps out under power.
+        const peak = REAL_MU * load * dt;
+        const sliding = REAL_SLIDE_MU * load * dt;
+        if (this.assist && Math.sign(jLong) !== Math.sign(vLong)) {
+          // Easy: ABS (the brakes stop short of sliding); drive is left alone for power slides.
+          const budget = Math.sqrt(Math.max(0, (0.92 * peak) ** 2 - jLat * jLat));
+          if (Math.abs(jLong) > budget) jLong = Math.sign(jLong) * budget;
+        }
+        const demand = Math.hypot(jLong, jLat);
+        if (!w.sliding && demand > peak) w.sliding = true;
+        else if (w.sliding && demand < 0.9 * sliding) w.sliding = false;
+        const cap = w.sliding ? sliding : peak;
+        if (demand > cap) {
+          if (!w.steered && c.throttle > 0.2 && Math.sign(jLong) === Math.sign(vLong || 1)) {
+            jLong = THREE.MathUtils.clamp(jLong, -0.85 * cap, 0.85 * cap);
+            const side = Math.sqrt(cap * cap - jLong * jLong);
+            jLat = THREE.MathUtils.clamp(jLat, -side, side);
+          } else {
+            jLong *= cap / demand;
+            jLat *= cap / demand;
+          }
+        }
+        w.slip = w.sliding ? 1 : Math.min(1, demand / peak);
       } else {
         // Easy: ABS and traction control in one. Cornering grip comes first; brakes and drive only get
         // what's left of the tyre, kept just short of sliding.
@@ -477,6 +546,15 @@ export class Bike {
       }
 
       if (!locked) w.spin += (vLong / WHEEL_RADIUS) * dt;
+      if (!w.steered) this.tailOut = Math.abs(vLong) > 1 ? Math.atan2(vLat, Math.abs(vLong)) : 0;
+      const washing = w.sliding && Math.atan2(Math.abs(vLat), Math.abs(vLong)) > WASH_OUT_ANGLE;
+      if (w.steered) this.frontWash = washing ? this.frontWash + dt : 0;
+    }
+    if (!this.wheels[1].grounded) this.tailOut = 0;
+    if (this.realistic && !this.assist && !this.crashed && absSpeed > 4) {
+      const roll = -Math.asin(THREE.MathUtils.clamp(_right.y, -1, 1));
+      if (Math.abs(this.tailOut) > SPIN_OUT) this.crash('spun out');
+      else if (this.frontWash > WASH_OUT_TIME && Math.abs(roll) > 0.3) this.crash('washed out the front');
     }
 
     this.grounded = groundedCount > 0;
@@ -608,10 +686,12 @@ export class Bike {
       // following actual yaw feeds a rear-wheel slide back into more lean.
       const turnLean = Math.atan2(this.speed * this.speed * Math.tan(this.requestedSteer), GRAVITY * WHEELBASE);
       // Easy: never ask for the last quarter of the tyres' grip; full lock on a keyboard stays safe.
-      const maxLean = this.assist ? MAX_LEAN * EASY_LEAN : MAX_LEAN;
+      const tyreLean = this.realistic ? REAL_MAX_LEAN : MAX_LEAN;
+      const maxLean = this.assist ? tyreLean * EASY_LEAN : tyreLean;
       const desired = THREE.MathUtils.clamp(turnLean + this.lean.x * 0.2, -maxLean, maxLean);
       // A rider can't throw the bike over instantly; snapping the target makes the wheels skip.
-      this.leanTarget += THREE.MathUtils.clamp(desired - this.leanTarget, -LEAN_RATE * dt, LEAN_RATE * dt);
+      const rate = this.realistic ? REAL_LEAN_RATE / (1 + Math.abs(this.speed) / 20) : LEAN_RATE;
+      this.leanTarget += THREE.MathUtils.clamp(desired - this.leanTarget, -rate * dt, rate * dt);
       const target = this.leanTarget;
       torque.addScaledVector(_fwd, INERTIA.z * (LEAN_KP * (target - roll) - LEAN_KD * rollRate));
       // Rear locked: the rider holds the slide, the back end out of the turn by a set angle (turning
@@ -628,13 +708,23 @@ export class Bike {
       } else {
         this.slidePrev = null;
       }
+      // Realistic power slide: the physics sets the angle (more throttle, more slide); the rider damps
+      // it and, past what countersteer can hold, fights it back.
+      if (this.realistic && !this.rearLocked && Math.abs(this.speed) > 3) {
+        const max = this.assist ? EASY_POWERSLIDE_MAX : POWERSLIDE_MAX;
+        const over = this.tailOut - THREE.MathUtils.clamp(this.tailOut, -max, max);
+        const rate = (this.tailOut - this.tailOutPrev) / dt;
+        const held = THREE.MathUtils.smoothstep(Math.abs(this.tailOut), 0.05, 0.2);
+        torque.addScaledVector(_up, -INERTIA.y * (SLIDE_KP * over + 4 * held * rate));
+      }
+      this.tailOutPrev = this.tailOut;
       // Easy: at walking pace (stalled on a face, rolling back) the rider dabs a foot and holds it up.
       if (this.assist) {
         const slow = 1 - THREE.MathUtils.smoothstep(Math.abs(this.speed), 1.5, 4);
         if (slow > 0) torque.addScaledVector(_fwd, -INERTIA.z * slow * (60 * roll + 10 * rollRate));
       }
       // A firm stop past the tyres' limit: the rider won't let it fold over.
-      const over = Math.abs(roll) - MAX_LEAN - 0.05;
+      const over = Math.abs(roll) - tyreLean - (this.realistic ? 0.12 : 0.05);
       if (over > 0) torque.addScaledVector(_fwd, -Math.sign(roll) * INERTIA.z * 400 * over);
       // Wheelie control: past a point the rider pulls the nose back down, unless leaning back for it.
       const nose = this.wheelieAngle;
@@ -657,10 +747,13 @@ export class Bike {
     } else {
       this.leanTarget = roll;
       // Mid-air: weight shift pitches and rolls the bike; throttle/brake torque the rear wheel.
-      const gyro = (c.throttle - c.brake) * 0.5;
-      torque.addScaledVector(_right, INERTIA.x * (-5 * this.lean.y + gyro - 1.2 * pitchRate));
-      torque.addScaledVector(_fwd, INERTIA.z * (5 * this.lean.x - 3 * roll - 2 * rollRate));
-      torque.addScaledVector(_up, -INERTIA.y * 2.5 * c.steer);
+      // Realistic: the spinning rear wheel is the main control, revving it lifts the nose and a dab of
+      // rear brake drops it; body English does less, and nothing lines the bike up for you.
+      const real = this.realistic;
+      const gyro = real ? c.throttle * 0.9 - c.brake * 1.8 : (c.throttle - c.brake) * 0.5;
+      torque.addScaledVector(_right, INERTIA.x * ((real ? -4 : -5) * this.lean.y + gyro - 1.2 * pitchRate));
+      torque.addScaledVector(_fwd, INERTIA.z * (5 * this.lean.x - (real ? 1.5 : 3) * roll - 2 * rollRate));
+      torque.addScaledVector(_up, -INERTIA.y * (real ? 1.2 : 2.5) * c.steer);
       // Spinning wheels and the rider keep the bike pointing where it's going: damp yaw, and turn the
       // nose gently towards the direction of travel.
       const yawRate = _angv.dot(_up);
@@ -668,12 +761,12 @@ export class Bike {
       const fx = _fwd.x, fz = _fwd.z, vx = _linv.x, vz = _linv.z;
       if (vx * vx + vz * vz > 25 && fx * fx + fz * fz > 0.1) {
         const off = Math.atan2(fz * vx - fx * vz, fx * vx + fz * vz); // + = travelling to the left of the nose
-        torque.addScaledVector(_up, INERTIA.y * 2.5 * off);
+        torque.addScaledVector(_up, INERTIA.y * (real ? 1.5 : 2.5) * off);
       }
       // A gentle pull that lines the bike up with its flight path, like a rider instinctively would.
       if (v2 > 25) {
         const align = _v.crossVectors(_fwd, _linv).divideScalar(Math.sqrt(v2)).dot(_right);
-        torque.addScaledVector(_right, INERTIA.x * 2.5 * align * (1 - Math.abs(this.lean.y)));
+        torque.addScaledVector(_right, INERTIA.x * (real ? 1.6 : 2.5) * align * (1 - Math.abs(this.lean.y)));
       }
     }
     // Split between bike and rider: the rider moves the bike with their body, and pushing only on

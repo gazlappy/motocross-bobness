@@ -32,6 +32,8 @@ export interface Settings {
   playerName: string;
   /** Easy: the rider shifts their own weight. Advanced: you do, as in the original. */
   controlScheme: 'easy' | 'advanced';
+  /** Classic: the arcade-tuned bike. Realistic: loose dirt grip, power slides, engine braking. */
+  handling: 'classic' | 'realistic';
   /** The detailed Honda CRF 450, or the original low-detail bike. */
   bikeModel: 'crf450' | 'classic';
   /** Retro: the original flat-coloured ground instead of the realistic one. */
@@ -58,6 +60,7 @@ export const DEFAULT_SETTINGS: Settings = {
   bike: '250',
   playerName: 'Rider',
   controlScheme: 'easy',
+  handling: 'classic',
   bikeModel: 'crf450',
   retro: true,
   version: 2,

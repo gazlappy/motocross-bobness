@@ -236,6 +236,7 @@ function attachHud() {
   const p = me.player;
   p.bike.autoShift = settings.gearbox === 'auto' || settings.controlScheme === 'easy';
   p.bike.assist = settings.controlScheme === 'easy';
+  p.bike.realistic = settings.handling === 'realistic';
   p.stunts.onTrick = (name, points) => {
     if (performance.now() < trickHoldUntil) return;
     showTrick(name ? `${name}<b>${Math.round(points).toLocaleString()}</b>` : '', false);
@@ -417,6 +418,7 @@ function applySettings(s: Settings) {
   const me = session?.human;
   if (me) me.player.bike.autoShift = s.gearbox === 'auto' || s.controlScheme === 'easy';
   if (me) me.player.bike.assist = s.controlScheme === 'easy';
+  if (me) me.player.bike.realistic = s.handling === 'realistic';
   hud.help.innerHTML = helpHtml();
   if (me && rig && rig.mode !== s.camera) rig.setMode(s.camera);
 }

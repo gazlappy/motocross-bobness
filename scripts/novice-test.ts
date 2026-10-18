@@ -1,7 +1,7 @@
 // How hard is the bike for a beginner? A "novice" rides Nationals: steers at the track and slows for
 // corners, but takes every jump at whatever speed it has, never leans, never sets up a landing.
 // Counts crashes (and why) with no assist, and with Easy controls' assist (bike.assist).
-// Usage: node scripts/novice-test.ts [laps]   (averages nine riders per case)
+// Usage: node scripts/novice-test.ts [laps] [realistic]   (averages nine riders per case)
 import RAPIER from '@dimforge/rapier3d-compat';
 import * as THREE from 'three';
 import { rapierHeights } from '../src/heightmap.ts';
@@ -11,6 +11,7 @@ import type { Controls } from '../src/input.ts';
 
 await RAPIER.init();
 const laps = Number(process.argv[2] ?? 2);
+const realistic = process.argv[3] === 'realistic';
 const DT = 1 / 120;
 const ground = nationalsGround();
 const hm = ground.hm, track = hm.track!;
@@ -23,6 +24,7 @@ function ride(easy: boolean, keyboard: boolean, slot: number, deadband: number) 
   const p = new Player(world, hm, pos, yaw);
   p.track = track;
   p.bike.assist = easy;
+  p.bike.realistic = realistic;
   const causes: Record<string, number> = {};
   const where: string[] = [];
   p.onCrash = (c) => {

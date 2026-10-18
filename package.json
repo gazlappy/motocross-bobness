@@ -8,7 +8,7 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
-    "sim": "node scripts/creep-test.ts && node scripts/straight-test.ts && node scripts/turn-test.ts && node scripts/lean-test.ts && node scripts/sim-test.ts && node scripts/crash-test.ts && node scripts/stunt-test.ts && node scripts/brake-slide-test.ts && node scripts/career-test.ts && node scripts/race-test.ts 1",
+    "sim": "node scripts/creep-test.ts && node scripts/straight-test.ts && node scripts/turn-test.ts && node scripts/lean-test.ts && node scripts/sim-test.ts && node scripts/crash-test.ts && node scripts/stunt-test.ts && node scripts/brake-slide-test.ts && node scripts/handling-test.ts && node scripts/career-test.ts && node scripts/race-test.ts 1",
     "check:heightfield": "node scripts/check-heightfield.ts",
     "render:engine": "node scripts/render-engine.ts",
     "race": "node scripts/race-test.ts 3",
