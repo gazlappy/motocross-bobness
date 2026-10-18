@@ -29,6 +29,8 @@ export class BajaDriver implements Driver {
     this.player = player;
     // Braking on the edge of grip, never locking up and sliding.
     player.bike.canLockRear = false;
+    // AI bikes pass through each other (packs jostling made them judder); they still bump you.
+    player.bike.riddenByAi();
     this.race = race;
     this.racer = racer;
     this.hm = hm;

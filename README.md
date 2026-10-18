@@ -23,7 +23,7 @@ npm run sim        # headless checks (physics, crashes, stunts, career rules, a 
 Controls (defaults): **W** throttle, **S** brake, **A/D** steer, **↑/↓** lean forward/back, **←/→** lean sideways,
 **Q/E** shift (switches to manual), **M** auto/manual, **C** camera (chase/far/helmet/thrill), **R** reset (or skip a wipeout), **N** mute, **G** retro / realistic ground.
 Gamepad: RT/LT gas and brake, left stick steer, right stick lean, A/X stunts, Y reset, B camera, Start for the menu.
-**Options > Controls**: choose **Easy** or **Advanced** (the original's full manual weight shift). In Easy the lean is automatic:
+**Options > Controls**: choose **Easy** (the default) or **Advanced** (the original's full manual weight shift). In Easy the lean is automatic:
 you only steer, gas and brake (the lean keys just pick stunts). The rider shifts their own weight (into turns, forward
 pulling away, back under braking), and the bike helps: in the air it lines itself up with the slope it will land on and
 stays upright; it straightens up on jump faces, never leans past three quarters of the tyres' grip, has traction control
@@ -75,7 +75,7 @@ flips add bonus points. Ride off the edge of the map and the out-of-bounds canno
 
 Crashes: land on your head, nose-dive, loop out, land flat from very high or get thrown off and the rider goes ragdoll; you respawn where you crashed once they stop tumbling.
 
-Ground: realistic by default: photo-scanned Poly Haven materials (grass, dirt, tyre-tracked mud on the racing line, sand, gravel, rock) blended by the same rules as the original colours, with normal-mapped relief, tri-planar rock on steep slopes and instanced grass tufts. **Options > Ground: Retro** (or the **G** key, rebindable) switches back to the original flat-coloured look, live. Bikes throw up dirt in both looks: dust trails behind the rear wheels (thick in the Baja sand, light on packed tracks), roost clods flung back by a driving or spinning tyre, and a burst of both on every landing. Physics is identical either way.
+Ground: retro by default (the original flat-coloured look); switch to realistic for photo-scanned Poly Haven materials (grass, dirt, tyre-tracked mud on the racing line, sand, gravel, rock) blended by the same rules as the original colours, with normal-mapped relief, tri-planar rock on steep slopes and instanced grass tufts. **Options > Ground** (or the **G** key, rebindable) switches between them, live. Bikes throw up dirt in both looks: dust trails behind the rear wheels (thick in the Baja sand, light on packed tracks), roost clods flung back by a driving or spinning tyre, and a burst of both on every landing. Physics is identical either way.
 
 Stack: TypeScript, Vite, Three.js, Rapier (WASM physics).
 

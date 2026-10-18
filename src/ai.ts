@@ -61,6 +61,8 @@ export class AIDriver implements Driver {
     this.player = player;
     // Braking on the edge of grip, never locking up and sliding.
     player.bike.canLockRear = false;
+    // AI bikes pass through each other (packs jostling made them judder); they still bump you.
+    player.bike.riddenByAi();
     this.track = track;
     this.skill = opts.skill;
     this.homeLane = this.lane = opts.lane;

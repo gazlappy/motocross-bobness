@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { BIKES, type BikeSpec } from './bikes.ts';
 import RAPIER from '@dimforge/rapier3d-compat';
 import type { Controls } from './input.ts';
-import { GROUP_BIKE, GROUP_PROBE, GROUP_RAGDOLL, GROUP_WORLD, Rider, groups } from './rider.ts';
+import { GROUP_AI_BIKE, GROUP_BIKE, GROUP_PROBE, GROUP_RAGDOLL, GROUP_WORLD, Rider, groups } from './rider.ts';
 
 // Bike-local axes: forward = -Z, right = +X, up = +Y.
 
@@ -18,6 +18,10 @@ const SUSP_TRAVEL = 0.42;
 const SUSP_K = 6200;
 const SUSP_BUMP_START = 0.36;
 const SUSP_BUMP_K = 90000;
+/** Where the progressive bump stop begins, and its rate: the same force at full travel as the old
+ * hard stop (SUSP_BUMP_K over the last few centimetres), reached smoothly. */
+const BUMP_ZONE_START = 0.34;
+const BUMP_K2 = (SUSP_BUMP_K * (SUSP_TRAVEL - SUSP_BUMP_START)) / (SUSP_TRAVEL - BUMP_ZONE_START) ** 2;
 const SUSP_DAMP_COMP = 900;
 const SUSP_DAMP_REBOUND = 1800;
 const TYRE_MU = 1.15;
@@ -145,6 +149,7 @@ export class Bike {
   /** While crashed the rider is a ragdoll and the bike is left to tumble. */
   crashed = false;
   readonly frame: RAPIER.Collider;
+  private readonly bumper: RAPIER.Collider;
   /** Set by the out-of-bounds cannon: the next landing's impact is forgiven. */
   cannonLanding = false;
   /** Easy controls: the bike helps (steadier in the air, forgiving landings, traction control). */
@@ -189,8 +194,20 @@ export class Bike {
         .setDensity(0)
         .setFriction(0.6)
         .setRestitution(0.2)
-        .setCollisionGroups(groups(GROUP_BIKE, GROUP_WORLD | GROUP_RAGDOLL | GROUP_BIKE))
+        .setCollisionGroups(groups(GROUP_BIKE, GROUP_WORLD | GROUP_RAGDOLL))
         .setActiveEvents(RAPIER.ActiveEvents.COLLISION_EVENTS),
+      this.body,
+    );
+    // Bike-to-bike contact goes through a rounded, slippery bumper: box corners snagging on each other
+    // jolted both bikes (visible judder when riders bunch up). The frame above only meets the ground.
+    this.bumper = world.createCollider(
+      RAPIER.ColliderDesc.capsule(0.42, 0.2)
+        .setTranslation(0, 0.25, 0)
+        .setRotation({ x: Math.SQRT1_2, y: 0, z: 0, w: Math.SQRT1_2 }) // lie along the bike
+        .setDensity(0)
+        .setFriction(0.1)
+        .setRestitution(0)
+        .setCollisionGroups(groups(GROUP_BIKE, GROUP_BIKE | GROUP_AI_BIKE)),
       this.body,
     );
     this.rider = new Rider(world, this.body);
@@ -240,6 +257,11 @@ export class Bike {
     this.gear = 0;
     this.rpm = this.spec.idle;
     this.upsideDownTime = 0;
+  }
+
+  /** An AI rider's bike: bumps the player's bike but passes through other AI bikes. */
+  riddenByAi() {
+    this.bumper.setCollisionGroups(groups(GROUP_AI_BIKE, GROUP_BIKE));
   }
 
   /** Heading around world Y, for cameras and resets. */
@@ -355,11 +377,12 @@ export class Bike {
       }
       w.compression = compression;
 
-      let springF = SUSP_K * compression;
-      if (compression > SUSP_BUMP_START) springF += SUSP_BUMP_K * (compression - SUSP_BUMP_START);
+      // Progressive bump stop near the end of travel: the extra spring and the hydraulic bottoming
+      // damping build in smoothly. A hard edge here jolted bikes on every roller (visible judder).
+      const bump = Math.max(0, compression - BUMP_ZONE_START);
+      let springF = SUSP_K * compression + BUMP_K2 * bump * bump;
       let damp = compVel > 0 ? SUSP_DAMP_COMP : SUSP_DAMP_REBOUND;
-      // Hydraulic bottoming: soak up energy near full travel instead of springing it back.
-      if (compression > SUSP_BUMP_START) damp *= 3;
+      damp *= 1 + 2 * THREE.MathUtils.smoothstep(compression, BUMP_ZONE_START, BUMP_ZONE_START + 0.05);
       // Never damp harder than one physics step can resolve, or the damper itself oscillates.
       damp = Math.min(damp, (0.8 * effectiveMass(origin, _up)) / dt);
       const dampF = compVel * damp;

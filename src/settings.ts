@@ -36,6 +36,8 @@ export interface Settings {
   bikeModel: 'crf450' | 'classic';
   /** Retro: the original flat-coloured ground instead of the realistic one. */
   retro: boolean;
+  /** Which defaults these settings have seen (see loadSettings). */
+  version: number;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -55,9 +57,10 @@ export const DEFAULT_SETTINGS: Settings = {
   freeVenue: 'nationals',
   bike: '250',
   playerName: 'Rider',
-  controlScheme: 'advanced',
+  controlScheme: 'easy',
   bikeModel: 'crf450',
-  retro: false,
+  retro: true,
+  version: 2,
 };
 
 const KEY = 'motocross-bobness:settings';
@@ -65,7 +68,18 @@ const KEY = 'motocross-bobness:settings';
 export function loadSettings(): Settings {
   try {
     const raw = localStorage.getItem(KEY);
-    if (raw) return { ...DEFAULT_SETTINGS, ...JSON.parse(raw) };
+    if (raw) {
+      const s: Settings = { ...DEFAULT_SETTINGS, version: 1, ...JSON.parse(raw) };
+      // Version 2 made Easy controls and the retro ground the defaults: give them to settings saved
+      // before then, once. After that the player's own choice sticks.
+      if (s.version < 2) {
+        s.controlScheme = 'easy';
+        s.retro = true;
+        s.version = 2;
+        saveSettings(s);
+      }
+      return s;
+    }
   } catch {
     // Storage unavailable or corrupt: fall back to defaults.
   }

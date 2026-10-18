@@ -29,6 +29,8 @@ export const GROUP_BIKE = 0x0002;
 export const GROUP_RIDER = 0x0004;
 export const GROUP_PROBE = 0x0008;
 export const GROUP_RAGDOLL = 0x0010;
+/** AI riders' bikes: they bump the player but pass through each other. */
+export const GROUP_AI_BIKE = 0x0020;
 export const groups = (membership: number, filter: number) => (membership << 16) | filter;
 
 /** Points on the rider in rider space, used for posing the visual model. */
