@@ -19,10 +19,15 @@ const SETTLED_SPEED = 0.7;
 const SETTLED_FOR = 0.6;
 
 // The original's out-of-bounds "invisible slingshot": leave the map and you're fired back across it.
-const OUT_OF_BOUNDS_MARGIN = 22; // m inside the map edge (up on the boundary cliffs)
+const OUT_OF_BOUNDS_MARGIN = 14; // m inside the map edge: across the flats on top of the boundary cliffs
 const CANNON_GRAVITY = 0.6; // floaty flight
 const CANNON_APEX = 35; // m above the launch point
-const CANNON_LANDING_RADIUS = 90; // m around the map centre
+const CANNON_LANDING_RADIUS = 40; // m around the map centre
+
+// Racing: ride this far outside the track's edge for this long and you're put back on it.
+const OFF_COURSE_MARGIN = 10; // m
+const OFF_COURSE_LIMIT = 5; // s
+const OFF_COURSE_WARN = 1.5; // s before the countdown shows
 
 const vec = (v: { x: number; y: number; z: number }) => new THREE.Vector3(v.x, v.y, v.z);
 
@@ -80,6 +85,8 @@ export class Player {
   track: Track | null = null;
   /** Preferred distance left of the track centreline when put back on it. */
   lane = 0;
+  /** Races: riding off the course for too long puts you back on it. */
+  keepOnCourse = false;
   /** Off for venues with walls (Supercross). */
   cannonEnabled = true;
   /** Off-track events (Baja): where to back off to after a crash, and which way to face. */
@@ -100,6 +107,7 @@ export class Player {
   private cannonFlight = false;
   private cannonCooldown = 0;
   private cannonTime = 0;
+  private offCourseTime = 0;
 
   constructor(world: RAPIER.World, hm: Heightmap, spawn: THREE.Vector3, yaw = 0, spec?: BikeSpec) {
     this.world = world;
@@ -247,6 +255,18 @@ export class Player {
     const v = new THREE.Vector3(lv.x, lv.y, lv.z);
     const w = new THREE.Vector3(av.x, av.y, av.z);
     const c = new THREE.Vector3(com.x, com.y, com.z);
+    // Thrown clear, as in the original: up and on in the direction of travel, tumbling head over heels,
+    // harder the faster you were going and hardest over the bars.
+    const bv0 = bike.body.linvel();
+    const travel = new THREE.Vector3(bv0.x, 0, bv0.z);
+    const speed = travel.length();
+    if (speed > 1) travel.divideScalar(speed);
+    else travel.set(-Math.sin(bike.yaw), 0, -Math.cos(bike.yaw));
+    const overBars = cause === 'over the bars' ? 1.6 : 1;
+    v.addScaledVector(travel, Math.min(6, 0.12 * speed) * overBars);
+    v.y += Math.min(7, 2.2 + 0.12 * speed) * (overBars > 1 ? 1.2 : 1);
+    const flipAxis = new THREE.Vector3(-travel.z, 0, travel.x); // to the right of travel: forward roll
+    w.addScaledVector(flipAxis, -Math.min(7, 1.5 + 0.2 * speed) * overBars);
     this.ragdoll = new Ragdoll(this.world, this.pose, (p) => w.clone().cross(p.clone().sub(c)).add(v));
 
     bike.rider.setActive(false);
@@ -282,7 +302,22 @@ export class Player {
       if (settled || this.crashTime > MAX_CRASH_TIME || this.ragdoll.centre.y < -50) this.respawn();
     } else if (t.y < -50) {
       this.reset(true);
+    } else if (this.keepOnCourse && this.track && !this.cannonFlight) {
+      const hit = this.track.nearest(t.x, t.z, 80);
+      const off = !hit || hit.distance > this.track.halfWidth + OFF_COURSE_MARGIN;
+      this.offCourseTime = off ? this.offCourseTime + dt : 0;
+      if (this.offCourseTime > OFF_COURSE_LIMIT) {
+        this.offCourseTime = 0;
+        this.reset();
+        this.onRespawn?.();
+      }
     }
+    if (this.ragdoll || this.cannonFlight) this.offCourseTime = 0;
+  }
+
+  /** Racing, riding off the course: seconds until you're put back on it (null while on course). */
+  get offCourseCountdown() {
+    return this.offCourseTime > OFF_COURSE_WARN ? OFF_COURSE_LIMIT - this.offCourseTime : null;
   }
 
   /** The rider pose to draw, from wherever the bodies are now. */

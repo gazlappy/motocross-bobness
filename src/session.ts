@@ -248,6 +248,7 @@ export class Session {
     const player = new Player(world, venue.hm, pos, yaw, spec);
     player.track = venue.hm.track;
     player.cannonEnabled = venue.cannon;
+    player.keepOnCourse = this.config.mode === 'race' || this.config.mode === 'attract';
     this.sim.players.push(player);
 
     const { bikeModel, riderModel } = this.models(colour, kit);

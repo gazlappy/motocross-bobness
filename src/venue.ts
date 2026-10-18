@@ -95,3 +95,22 @@ export function scatterRocks(hm: Heightmap, count: number, colour = 0x8b6248, ke
   rocks.castShadow = rocks.receiveShadow = true;
   return rocks;
 }
+
+/** Solid rocks: a convex hull for each scattered rock, the same shape as drawn. */
+export function rockColliders(rocks: THREE.InstancedMesh) {
+  const corners = rocks.geometry.attributes.position;
+  const m = new THREE.Matrix4();
+  const v = new THREE.Vector3();
+  const descs: RAPIER.ColliderDesc[] = [];
+  for (let i = 0; i < rocks.count; i++) {
+    rocks.getMatrixAt(i, m);
+    const points = new Float32Array(corners.count * 3);
+    for (let k = 0; k < corners.count; k++) {
+      v.fromBufferAttribute(corners, k).applyMatrix4(m);
+      points.set([v.x, v.y, v.z], k * 3);
+    }
+    const desc = RAPIER.ColliderDesc.convexHull(points);
+    if (desc) descs.push(desc.setFriction(0.8));
+  }
+  return descs;
+}

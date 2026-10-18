@@ -21,8 +21,11 @@ export interface TerrainDef {
   seed: number;
   /** Ground height before any track work. */
   natural: (noise: Noise2D, x: number, z: number) => number;
-  /** Cliff wall round the map edge: its height and how far in from the edge it starts. */
-  edgeWall: { height: number; width: number } | null;
+  /**
+   * Cliff wall round the map edge: its height, how wide its slope is, and the flat top beyond it
+   * (`plateau` metres, ending in a low crest at the map edge) where you ride before the cannon fires.
+   */
+  edgeWall: { height: number; width: number; plateau?: number } | null;
   track: Track | null;
   /** Distance from the track over which the hills fade back to their natural height. */
   trackBlend: number;
@@ -36,6 +39,10 @@ const smoothstep = (e0: number, e1: number, x: number) => {
 };
 
 const FAR = 1000;
+/** The crest at the outer edge of a wall's flats (beyond where the cannon fires). */
+const EDGE_CREST = { width: 16, height: 9 };
+/** Flats along the top of the boundary walls, metres. */
+export const EDGE_PLATEAU = 50;
 
 export function buildHeightmap(def: TerrainDef): Heightmap {
   const { size, cells, track } = def;
@@ -50,14 +57,17 @@ export function buildHeightmap(def: TerrainDef): Heightmap {
   // For each block of the map, the track samples that could be nearest to a point in it
   // (anything further than `reach` away is treated as off the track).
   const BLOCK = 16, reach = def.trackBlend + 10;
-  const blocks = Math.ceil(size / BLOCK);
+  // Blocks line up with the arena inside the edge flats, so adding flats leaves the arena unchanged.
+  const plateau = def.edgeWall?.plateau ?? 0;
+  const origin = -half + plateau - BLOCK * Math.ceil(plateau / BLOCK);
+  const blocks = Math.ceil((half - origin) / BLOCK);
   const candidates: number[][] = [];
   const samples = track?.samples ?? [];
   const levels = samples.map((_, i) => track!.elevation(track!.sAt(i)));
   if (track) {
     for (let bz = 0; bz < blocks; bz++) {
       for (let bx = 0; bx < blocks; bx++) {
-        const cx = -half + (bx + 0.5) * BLOCK, cz = -half + (bz + 0.5) * BLOCK;
+        const cx = origin + (bx + 0.5) * BLOCK, cz = origin + (bz + 0.5) * BLOCK;
         const r = reach + BLOCK;
         const list: number[] = [];
         samples.forEach((smp, i) => {
@@ -72,7 +82,8 @@ export function buildHeightmap(def: TerrainDef): Heightmap {
     for (let ix = 0; ix < n; ix++) {
       const x = -half + ix * cellSize;
       const z = -half + iz * cellSize;
-      let h = def.natural(noise, x, z);
+      const natural = def.natural(noise, x, z);
+      let h = natural;
 
       for (const f of flats) {
         const d = Math.hypot(x - f.x, z - f.z);
@@ -81,7 +92,7 @@ export function buildHeightmap(def: TerrainDef): Heightmap {
 
       if (track) {
         const block = candidates[
-          Math.min(blocks - 1, Math.floor((z + half) / BLOCK)) * blocks + Math.min(blocks - 1, Math.floor((x + half) / BLOCK))
+          Math.min(blocks - 1, Math.floor((z - origin) / BLOCK)) * blocks + Math.min(blocks - 1, Math.floor((x - origin) / BLOCK))
         ];
         // Nearest sample, plus a distance-weighted track level: taking the level from the nearest
         // sample alone leaves a crease in the infield where "nearest" flips between two straights.
@@ -119,10 +130,15 @@ export function buildHeightmap(def: TerrainDef): Heightmap {
         }
       }
 
-      // Cliff walls at the map edge, like the original's bowl-shaped arenas.
+      // Cliff walls at the map edge, like the original's bowl-shaped arenas, with flats along the top
+      // and a crest at the very edge so you see a skyline rather than the end of the world.
       if (def.edgeWall) {
+        const { height, width } = def.edgeWall;
         const edge = half - Math.max(Math.abs(x), Math.abs(z));
-        h += smoothstep(def.edgeWall.width, 0, edge) * def.edgeWall.height;
+        // Up top the hills mostly level out, so the flats are flat.
+        const level = smoothstep(plateau + 0.6 * width, plateau, edge);
+        h += smoothstep(plateau + width, plateau, edge) * height - level * 0.8 * natural;
+        if (plateau > 0) h += smoothstep(EDGE_CREST.width, 0, edge) * EDGE_CREST.height;
       }
       heights[iz * n + ix] = h;
     }
@@ -133,14 +149,14 @@ export function buildHeightmap(def: TerrainDef): Heightmap {
 /** The Nationals venue's ground: rolling desert hills with the track carved through. */
 export function nationalsTerrain(track = new Track()): TerrainDef {
   return {
-    size: 640,
-    cells: 512,
+    size: 640 + 2 * EDGE_PLATEAU,
+    cells: (640 + 2 * EDGE_PLATEAU) / 1.25,
     seed: 7,
     natural: (noise, x, z) =>
       noise.fbm(x / 230, z / 230, 5) * 34 +
       Math.max(0, noise.fbm(x / 95 + 13.1, z / 95 - 4.2, 4)) * 18 +
       noise.fbm(x / 18, z / 18, 2) * 0.5,
-    edgeWall: { height: 55, width: 60 },
+    edgeWall: { height: 55, width: 60, plateau: EDGE_PLATEAU },
     track,
     trackBlend: 90,
   };

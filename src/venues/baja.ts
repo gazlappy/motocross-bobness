@@ -1,9 +1,9 @@
 import * as THREE from 'three';
 import type RAPIER from '@dimforge/rapier3d-compat';
-import { buildHeightmap, sampleHeight } from '../heightmap.ts';
+import { EDGE_PLATEAU, buildHeightmap, sampleHeight } from '../heightmap.ts';
 import { DESERT, createTerrainMesh } from '../terrain.ts';
 import { BAJA_LOOK } from '../terrainLook.ts';
-import { type Atmosphere, type Ground, SUNNY, type Venue, onGround, scatterRocks, venueColliders } from '../venue.ts';
+import { type Atmosphere, type Ground, SUNNY, type Venue, onGround, rockColliders, scatterRocks, venueColliders } from '../venue.ts';
 
 // Baja: open desert, 1.28 km across, with dunes, mesas and washes. No track: a chain of waypoints
 // across the map, each marked by a flag and a tall beacon you can see from far away.
@@ -58,8 +58,8 @@ export function bajaGround(): Ground {
   const flats = [...WAYPOINTS, START].map(([x, z]) => ({ x, z, r: 30 }));
   flats[flats.length - 1].r = 45;
   const hm = buildHeightmap({
-    size: 1280,
-    cells: 512,
+    size: 1280 + 2 * EDGE_PLATEAU,
+    cells: (1280 + 2 * EDGE_PLATEAU) / 2.5,
     seed: 21,
     natural: (noise, x, z) => {
       let h = noise.fbm(x / 420, z / 420, 4) * 40; // broad rolling country
@@ -72,7 +72,7 @@ export function bajaGround(): Ground {
       h += noise.fbm(x / 15, z / 15, 2) * 0.5;
       return h;
     },
-    edgeWall: { height: 70, width: 80 },
+    edgeWall: { height: 70, width: 80, plateau: EDGE_PLATEAU },
     track: null,
     trackBlend: 0,
     flats,
@@ -108,13 +108,14 @@ export function buildBaja(world: RAPIER.World): Venue {
   });
   const keepClear = [...WAYPOINTS, START].map(([x, z]) => ({ x, z, r: 50 }));
   const root = new THREE.Group();
-  root.add(createTerrainMesh(hm, DESERT, 8, BAJA_LOOK), scatterRocks(hm, 700, 0x8b6248, keepClear, 777), ...markers);
+  const rocks = scatterRocks(hm, 700, 0x8b6248, keepClear, 777);
+  root.add(createTerrainMesh(hm, DESERT, 8, BAJA_LOOK), rocks, ...markers);
   return {
     ...ground,
     id: 'baja',
     name: 'Baja',
     root,
-    colliders: venueColliders(world, hm),
+    colliders: venueColliders(world, hm, rockColliders(rocks)),
     atmosphere: DESERT_FAR,
     cannon: true,
     dirt: { dust: 0xd8bc8e, clod: 0xa8834f, dustAmount: 1.6, clodAmount: 0.6 },

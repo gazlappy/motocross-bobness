@@ -1,9 +1,9 @@
 import * as THREE from 'three';
 import type RAPIER from '@dimforge/rapier3d-compat';
-import { buildHeightmap } from '../heightmap.ts';
+import { EDGE_PLATEAU, buildHeightmap } from '../heightmap.ts';
 import { type TerrainPalette, createTerrainMesh } from '../terrain.ts';
 import { QUARRY_LOOK } from '../terrainLook.ts';
-import { type Atmosphere, type Ground, SUNNY, type Venue, onGround, scatterRocks, venueColliders } from '../venue.ts';
+import { type Atmosphere, type Ground, SUNNY, type Venue, onGround, rockColliders, scatterRocks, venueColliders } from '../venue.ts';
 
 // The Stunt Quarry: "monstrous arenas of hills optimally placed for stunt jumping". Big kickers aimed
 // at landing mounds, mesas, a volcano and high banks round the edge that lead to the cannon.
@@ -61,8 +61,8 @@ const HAZE: Atmosphere = { ...SUNNY, sky: 0xa3c6e3, fog: { color: 0xd3d6d6, near
 
 export function quarryGround(): Ground {
   const hm = buildHeightmap({
-    size: 520,
-    cells: 416,
+    size: 520 + 2 * EDGE_PLATEAU,
+    cells: (520 + 2 * EDGE_PLATEAU) / 1.25,
     seed: 11,
     natural: (noise, x, z) => {
       let h = noise.fbm(x / 140, z / 140, 4) * 3 + noise.fbm(x / 20, z / 20, 2) * 0.4;
@@ -74,7 +74,7 @@ export function quarryGround(): Ground {
       return h;
     },
     // High banks all round: ride up them for air, or over the top for the cannon.
-    edgeWall: { height: 48, width: 85 },
+    edgeWall: { height: 48, width: 85, plateau: EDGE_PLATEAU },
     track: null,
     trackBlend: 0,
     flats: [{ x: 0, z: 0, r: 30 }],
@@ -87,13 +87,14 @@ export function buildQuarry(world: RAPIER.World): Venue {
   const ground = quarryGround();
   const hm = ground.hm;
   const root = new THREE.Group();
-  root.add(createTerrainMesh(hm, STONE, 7, QUARRY_LOOK), scatterRocks(hm, 160, 0x7d7468, [{ x: 0, z: 0, r: 40 }], 99));
+  const rocks = scatterRocks(hm, 160, 0x7d7468, [{ x: 0, z: 0, r: 40 }], 99);
+  root.add(createTerrainMesh(hm, STONE, 7, QUARRY_LOOK), rocks);
   return {
     ...ground,
     id: 'quarry',
     name: 'Stunt Quarry',
     root,
-    colliders: venueColliders(world, hm),
+    colliders: venueColliders(world, hm, rockColliders(rocks)),
     atmosphere: HAZE,
     cannon: true,
     dirt: { dust: 0xcabfaa, clod: 0x8a8070, dustAmount: 1.3, clodAmount: 0.7 },

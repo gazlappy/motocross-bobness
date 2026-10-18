@@ -326,6 +326,16 @@ function payoutHtml(p: EventPayout) {
   return `<div class="career-payout">${lines.map((l) => `<p>${l}</p>`).join('')}<p>Bank: <b>${money(career.cash)}</b></p></div>`;
 }
 
+let offCourseShown = -1;
+/** Racing: count down while the rider is off the course, before they're put back on it. */
+function updateOffCourse() {
+  const left = session.human?.player.offCourseCountdown ?? null;
+  const n = left === null ? -1 : Math.ceil(left);
+  if (n === offCourseShown) return;
+  offCourseShown = n;
+  if (n > 0) flashBanner(`OFF COURSE<small>back on the track in ${n}</small>`, 1200);
+}
+
 function updateEventHud() {
   const me = session.human;
   const event = session.event;
@@ -619,6 +629,7 @@ function frame(now: number) {
   const bike = star.player.bike;
   sound.update(me && running ? me.player.bike : null, camera);
   updateEventHud();
+  updateOffCourse();
   const focus = star.player.focus;
   if (running) rig.update(bike, dt, focus);
   const t = focus ?? bike.body.translation();
