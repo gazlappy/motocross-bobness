@@ -163,7 +163,10 @@ function tableHtml(t: ResultsTable) {
   return { title: t.title, html: `<table>${head}${rows.join('')}</table>` };
 }
 
-/** Baja: a flat chevron over your bike pointing at the next waypoint (like the original's GPS arrow). */
+/**
+ * A flat chevron over your bike, like the original's: Baja's points at the next waypoint, and a green
+ * one points back to where you left the track.
+ */
 const chevron = new THREE.Shape();
 chevron.moveTo(0, 1.1);
 chevron.lineTo(0.75, -0.2);
@@ -375,6 +378,17 @@ function updateEventHud() {
   }
   hud.race.innerHTML = event.hud(r);
 
+  const back = me.player.offCourseTarget;
+  if (back && !r.finished) {
+    const t = me.player.bike.body.translation();
+    (arrow.material as THREE.MeshBasicMaterial).color.set(0x3dff5a);
+    arrow.visible = true;
+    arrow.position.set(t.x, t.y + 2.6, t.z);
+    arrow.lookAt(back.x, t.y + 2.6, back.z);
+    arrow.rotateX(0.35);
+    return;
+  }
+  (arrow.material as THREE.MeshBasicMaterial).color.set(0xffb020);
   if (event instanceof BajaRace) {
     // Beacons: the next waypoint glows orange, ones already reached go green and faint.
     venue.markers?.forEach((m, i) => {

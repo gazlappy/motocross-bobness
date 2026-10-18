@@ -57,7 +57,7 @@ names.forEach((name, i) => {
 });
 event.onFinish = (r, place) => console.log(`${r.name} finished P${place} at ${r.finishTime.toFixed(1)} s`);
 
-const limit = venueId === 'baja' ? 400 : laps * 120 + 10;
+const limit = venueId === 'baja' ? 400 : laps * 180 + 10;
 const t0 = performance.now();
 for (let i = 0; i < limit / DT; i++) {
   const controls = drivers.map((d) => d.controls(DT, sim.players, event.started));

@@ -24,10 +24,12 @@ const CANNON_GRAVITY = 0.6; // floaty flight
 const CANNON_APEX = 35; // m above the launch point
 const CANNON_LANDING_RADIUS = 40; // m around the map centre
 
-// Racing: ride this far outside the track's edge for this long and you're put back on it.
-const OFF_COURSE_MARGIN = 10; // m
+// Racing, as in the original: leave the track and you have this long to rejoin it where you left it
+// (cutting across to another part of the track doesn't count), or you're put back at that point.
+const OFF_COURSE_MARGIN = 8; // m past the track's edge (the berms are still on course)
 const OFF_COURSE_LIMIT = 5; // s
 const OFF_COURSE_WARN = 1.5; // s before the countdown shows
+const REJOIN_WINDOW = 30; // m either side of where you left that count as rejoining
 
 const vec = (v: { x: number; y: number; z: number }) => new THREE.Vector3(v.x, v.y, v.z);
 
@@ -108,6 +110,10 @@ export class Player {
   private cannonCooldown = 0;
   private cannonTime = 0;
   private offCourseTime = 0;
+  /** Racing: how far round the lap you last were while on the track (null: find it afresh). */
+  private courseS: number | null = null;
+  /** Where you left the track. */
+  private exitS = 0;
 
   constructor(world: RAPIER.World, hm: Heightmap, spawn: THREE.Vector3, yaw = 0, spec?: BikeSpec) {
     this.world = world;
@@ -303,16 +309,37 @@ export class Player {
     } else if (t.y < -50) {
       this.reset(true);
     } else if (this.keepOnCourse && this.track && !this.cannonFlight) {
-      const hit = this.track.nearest(t.x, t.z, 80);
-      const off = !hit || hit.distance > this.track.halfWidth + OFF_COURSE_MARGIN;
-      this.offCourseTime = off ? this.offCourseTime + dt : 0;
-      if (this.offCourseTime > OFF_COURSE_LIMIT) {
+      const track = this.track;
+      const hit = this.courseS === null ? track.nearest(t.x, t.z, 80) : track.follow(t.x, t.z, this.courseS, REJOIN_WINDOW);
+      if (hit && hit.distance <= track.halfWidth + OFF_COURSE_MARGIN) {
+        this.courseS = hit.s;
         this.offCourseTime = 0;
-        this.reset();
-        this.onRespawn?.();
+      } else {
+        if (this.offCourseTime === 0) this.exitS = this.courseS ?? hit?.s ?? 0;
+        this.offCourseTime += dt;
+        if (this.offCourseTime > OFF_COURSE_LIMIT) this.returnToCourse();
       }
     }
     if (this.ragdoll || this.cannonFlight) this.offCourseTime = 0;
+  }
+
+  /** Back on the track where you left it (short of any jump there), facing down the track. */
+  private returnToCourse() {
+    const track = this.track!;
+    let s = this.exitS;
+    for (let k = 0; k < 80 && track.jumpProfile(s) > 0.05; k++) s -= 1;
+    const p = track.sample(s);
+    const lane = THREE.MathUtils.clamp(this.lane, -3, 3);
+    this.placeBike(new THREE.Vector3(p.x + p.tz * lane, 0, p.z - p.tx * lane), Math.atan2(-p.tx, -p.tz), false);
+    this.courseS = s;
+    this.onRespawn?.();
+  }
+
+  /** Racing, off the track: where to rejoin it (null while on it). */
+  get offCourseTarget() {
+    if (this.offCourseTime === 0 || !this.track) return null;
+    const p = this.track.sample(this.exitS);
+    return new THREE.Vector3(p.x, 0, p.z);
   }
 
   /** Racing, riding off the course: seconds until you're put back on it (null while on course). */
@@ -387,5 +414,7 @@ export class Player {
     const p = at.clone();
     p.y = sampleHeight(this.hm, p.x, p.z) + 1.0;
     this.bike.reset(p, yaw);
+    this.courseS = null;
+    this.offCourseTime = 0;
   }
 }

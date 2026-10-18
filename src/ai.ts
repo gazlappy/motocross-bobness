@@ -108,7 +108,9 @@ export class AIDriver implements Driver {
     for (let d = 0; d <= LOOK_SPEED; d += 3) {
       const k = Math.abs(this.track.sample(this.s + d).curvature);
       const corner = k > 1e-4 ? Math.sqrt((GRIP * this.skill) / k) : Infinity;
-      target = Math.min(target, Math.sqrt(corner * corner + 2 * BRAKING * d));
+      // Braking downhill takes longer: gravity eats into it.
+      const fall = Math.max(0, (this.track.elevation(this.s) - this.track.elevation(this.s + d)) / Math.max(d, 8));
+      target = Math.min(target, Math.sqrt(corner * corner + 2 * Math.max(2, BRAKING - 9.81 * fall) * d));
     }
     // Hit each jump at the speed it's built for (overshooting a landing is as bad as casing it).
     for (const j of this.track.jumps) {
@@ -121,7 +123,9 @@ export class AIDriver implements Driver {
     }
     if (bike.grounded) {
       c.throttle = v < target ? THREE.MathUtils.clamp((target - v) * 0.5 + 0.35, 0, 1) : 0;
-      c.brake = v > target + 0.8 && !onJump ? THREE.MathUtils.clamp((v - target) * 0.6, 0, 1) : 0;
+      // Firm but not grabbing a fistful, weight back as it bites so the bike doesn't stand on its nose.
+      c.brake = v > target + 0.8 && !onJump ? THREE.MathUtils.clamp((v - target) * 0.6, 0, 0.8) : 0;
+      c.leanForward = -0.8 * c.brake;
     } else {
       airControls(bike, c);
     }

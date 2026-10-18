@@ -12,7 +12,9 @@ const hm = generateHeightmap();
 const DT = 1 / 120;
 const idle: Controls = { throttle: 0, brake: 0, steer: 0, leanForward: 0, leanSide: 0 };
 
-function setup(at = new THREE.Vector3(0, 0, 20), yaw = 0) {
+// On the start straight, facing down the track (its rollers and tabletop give air).
+const START = hm.track!.sample(2);
+function setup(at = new THREE.Vector3(START.x, 0, START.z), yaw = Math.atan2(-START.tx, -START.tz)) {
   const world = new RAPIER.World({ x: 0, y: -9.81, z: 0 });
   world.timestep = DT;
   world.createCollider(RAPIER.ColliderDesc.heightfield(hm.cells, hm.cells, rapierHeights(hm), { x: hm.size, y: 1, z: hm.size }));
@@ -131,6 +133,51 @@ const check = (name: string, pass: boolean, detail: string) => {
   };
   const tail = pitch('downLeft'), skurfer = pitch('down');
   check('Tail Stand pulls the nose up', tail > skurfer + 0.2, `nose height (sin of pitch) ${tail.toFixed(2)} vs ${skurfer.toFixed(2)} in a Skurfer`);
+}
+
+// 7. Racing off the track: cut across to another part of it and you're put back where you left it;
+// ride back on where you left and nothing happens.
+{
+  const track = hm.track!;
+  const place = (s: number, lateral = 0) => {
+    const p = track.sample(s);
+    return new THREE.Vector3(p.x + p.tz * lateral, 0, p.z - p.tx * lateral);
+  };
+  const heading = (s: number) => Math.atan2(-track.sample(s).tx, -track.sample(s).tz);
+  const leave = (player: Player, at: THREE.Vector3, leftAt: number) => {
+    player.placeBike(at, 0, false);
+    (player as unknown as { courseS: number }).courseS = leftAt;
+  };
+
+  const cut = setup(place(440), heading(440));
+  cut.player.track = track;
+  cut.player.keepOnCourse = true;
+  cut.run(0.5, () => idle);
+  leave(cut.player, place(740), 440); // onto another leg, 300 m further round
+  let resetAt: THREE.Vector3 | null = null;
+  cut.player.onRespawn = () => {
+    const t = cut.player.bike.body.translation();
+    resetAt = new THREE.Vector3(t.x, t.y, t.z);
+  };
+  cut.run(6, () => idle, () => resetAt !== null);
+  const at = resetAt as THREE.Vector3 | null;
+  const hit = at ? track.nearest(at.x, at.z, 60) : null;
+  check('cutting across resets you where you left', hit !== null && Math.abs(hit.s - 440) < 15,
+    hit ? `put back at ${hit.s.toFixed(0)} m (left at 440 m)` : 'never reset');
+
+  const stay = setup(place(440), heading(440));
+  stay.player.track = track;
+  stay.player.keepOnCourse = true;
+  let reset = false;
+  stay.player.onRespawn = () => { reset = true; };
+  stay.run(0.5, () => idle);
+  leave(stay.player, place(445, 20), 440); // off the edge
+  stay.run(2, () => idle);
+  const shown = stay.player.offCourseTarget !== null;
+  leave(stay.player, place(450), 440); // back on, where we left
+  stay.run(5, () => idle);
+  check('rejoining where you left is fine', shown && !reset && stay.player.offCourseTarget === null,
+    `arrow shown while off: ${shown}, reset: ${reset}`);
 }
 
 console.log(ok ? '\nAll stunt checks passed.' : '\nSome stunt checks FAILED.');
