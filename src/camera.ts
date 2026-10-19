@@ -2,8 +2,23 @@ import * as THREE from 'three';
 import type { Bike } from './bike.ts';
 import { type Heightmap, sampleHeight } from './heightmap.ts';
 
-export type CameraMode = 'chase' | 'far' | 'helmet' | 'thrill';
-const MODES: CameraMode[] = ['chase', 'far', 'helmet', 'thrill'];
+// The original's eight views: Chase, Slot (behind and to the right), Sky (overhead, following),
+// Rider (helmet), User (far chase, adjustable), Bird's-Eye (one fixed spot), Thrill and Reverse (from
+// in front, to see who's behind you).
+export type CameraMode = 'chase' | 'slot' | 'sky' | 'helmet' | 'far' | 'birdseye' | 'thrill' | 'reverse';
+export const CAMERA_MODES: CameraMode[] = ['chase', 'slot', 'sky', 'helmet', 'far', 'birdseye', 'thrill', 'reverse'];
+export const CAMERA_NAMES: Record<CameraMode, string> = {
+  chase: 'Chase', slot: 'Slot', sky: 'Sky', helmet: 'Rider', far: 'User', birdseye: "Bird's-Eye", thrill: 'Thrill', reverse: 'Reverse',
+};
+const MODES = CAMERA_MODES;
+
+/** Following views: distance behind, height, and offset to the right. */
+const FOLLOW: Partial<Record<CameraMode, { dist: number; height: number; side: number }>> = {
+  chase: { dist: 5.2, height: 2.0, side: 0 },
+  far: { dist: 9, height: 3.6, side: 0 },
+  slot: { dist: 5.4, height: 2.3, side: 2.6 },
+  sky: { dist: 7, height: 22, side: 0 },
+};
 
 const _target = new THREE.Vector3();
 const _desired = new THREE.Vector3();
@@ -20,6 +35,8 @@ export class CameraRig {
   private spotSide = 1;
   readonly camera: THREE.PerspectiveCamera;
   hm: Heightmap;
+  /** The player's own adjustments (numeric keypad): distance scale, orbit and height, for the following views. */
+  user = { zoom: 1, orbit: 0, raise: 0 };
 
   constructor(camera: THREE.PerspectiveCamera, hm: Heightmap) {
     this.camera = camera;
@@ -44,8 +61,25 @@ export class CameraRig {
     _target.set(t.x, t.y, t.z);
     if (focus) _target.copy(focus);
 
-    if (this.mode === 'thrill') {
+    if (this.mode === 'thrill' || this.mode === 'birdseye') {
       this.updateThrill(bike, dt, focus);
+      return;
+    }
+    if (this.mode === 'reverse') {
+      // From in front, looking back at the rider (and whoever's on their tail).
+      const ahead = new THREE.Vector3(-Math.sin(bike.yaw), 0, -Math.cos(bike.yaw));
+      _desired.copy(_target).addScaledVector(ahead, 6.5).setY(_target.y + 1.8);
+      const ground = sampleHeight(this.hm, _desired.x, _desired.z) + 0.8;
+      if (_desired.y < ground) _desired.y = ground;
+      if (!this.initialised) {
+        this.pos.copy(_desired);
+        this.initialised = true;
+      }
+      this.pos.lerp(_desired, 1 - Math.exp(-dt * 8));
+      this.camera.position.copy(this.pos);
+      this.camera.lookAt(_target.x, _target.y + 0.8, _target.z);
+      this.camera.fov = 66;
+      this.camera.updateProjectionMatrix();
       return;
     }
 
@@ -69,13 +103,14 @@ export class CameraRig {
     // Hold the heading steady while the bike cartwheels after a crash.
     if (!focus) this.heading += dh * Math.min(1, dt * (bike.grounded ? 4 : 1.2));
 
-    const far = this.mode === 'far' || !!focus;
-    const dist = (far ? 9 : 5.2) + Math.min(flatSpeed, 30) * 0.05;
-    const height = far ? 3.6 : 2.0;
+    const view = focus ? FOLLOW.far! : FOLLOW[this.mode] ?? FOLLOW.chase!;
+    const dist = (view.dist + Math.min(flatSpeed, 30) * 0.05) * this.user.zoom;
+    const height = view.height * this.user.zoom + this.user.raise;
+    const h = this.heading + this.user.orbit;
     _desired.set(
-      _target.x + Math.sin(this.heading) * dist,
+      _target.x + Math.sin(h) * dist + Math.cos(h) * view.side,
       _target.y + height,
-      _target.z + Math.cos(this.heading) * dist,
+      _target.z + Math.cos(h) * dist - Math.sin(h) * view.side,
     );
     const ground = sampleHeight(this.hm, _desired.x, _desired.z) + 0.8;
     if (_desired.y < ground) _desired.y = ground;
@@ -103,8 +138,11 @@ export class CameraRig {
     _target.set(t.x, t.y + 0.7, t.z);
     this.spotTime += dt;
     const dist = this.spot.distanceTo(_target);
-    if (!this.initialised || dist > 60 || this.spotTime > 7 || (this.spotTime > 1 && this.occluded(this.spot, _target))) {
+    const birds = this.mode === 'birdseye';
+    const tooFar = birds ? dist > 140 : dist > 60 || this.spotTime > 7;
+    if (!this.initialised || tooFar || (this.spotTime > 1 && this.occluded(this.spot, _target))) {
       this.pickSpot(bike);
+      if (birds) this.spot.y += 18 + Math.random() * 10;
       this.look.copy(_target);
       this.initialised = true;
     }
@@ -112,7 +150,7 @@ export class CameraRig {
     this.camera.position.copy(this.spot);
     this.camera.lookAt(this.look);
     const d = Math.max(4, this.spot.distanceTo(_target));
-    this.camera.fov = THREE.MathUtils.clamp(THREE.MathUtils.radToDeg(2 * Math.atan(4.5 / d)), 14, 65);
+    this.camera.fov = birds ? 55 : THREE.MathUtils.clamp(THREE.MathUtils.radToDeg(2 * Math.atan(4.5 / d)), 14, 65);
     this.camera.updateProjectionMatrix();
   }
 

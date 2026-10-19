@@ -88,6 +88,8 @@ const hud = {
   race: document.getElementById('race')!,
   loading: document.getElementById('loading')!,
   replay: document.getElementById('replay')!,
+  stats: document.getElementById('stats')!,
+  speedo: document.getElementById('hud')!,
 };
 
 // ---- Venues ---------------------------------------------------------------------------------------
@@ -135,6 +137,7 @@ function useVenue(v: Venue) {
   camera.far = a.far;
   camera.updateProjectionMatrix();
   sound.setCrowd(a.crowd);
+  applyView();
   if (rig) rig.hm = v.hm;
   else rig = new CameraRig(camera, v.hm);
 }
@@ -221,11 +224,25 @@ let lastCount = -1;
 let resultsTimer = 0;
 /** Watching a replay (the game itself is frozen meanwhile), and which screen to go back to. */
 let replay: ReplayPlayer | null = null;
+/**
+ * The original's in-game hot keys: F5 statistics, F6 visual cues (arrows and markers), F7
+ * speedometer, F8 scenery (stands, dressing, rocks), F9 dust, F10 shadows, F11/F12 graphics quality
+ * down/up, B rider names; PageUp/PageDown watch the other riders.
+ */
+const view = { stats: false, cues: true, speedo: true, scenery: true, particles: true, names: false };
+/** Which rider the camera is watching (an index into the game's riders), or null for the usual one. */
+let watching: number | null = null;
+const nameTags = new Map<object, THREE.Sprite>();
+const stats = { topSpeed: 0, air: 0, longestAir: 0, fps: 60 };
 let replayFrom: 'results' | 'pause' = 'results';
 
 /** Tear down whatever is running and start a game (or the menu's attract mode). */
 async function begin(config: SessionConfig) {
   stopReplay(false);
+  watching = null;
+  for (const tag of nameTags.values()) scene.remove(tag);
+  nameTags.clear();
+  Object.assign(stats, { topSpeed: 0, air: 0, longestAir: 0 });
   session?.dispose();
   clearTimeout(resultsTimer);
   useVenue(await getVenue(config.venue));
@@ -450,7 +467,8 @@ function helpHtml() {
     : `${k('leanForward')}/${k('leanBack')} lean fwd/back &nbsp; ${k('leanLeft')}/${k('leanRight')} lean sideways`;
   return `${k('throttle')} throttle &nbsp; ${k('brake')} brake &nbsp; ${k('steerLeft')}/${k('steerRight')} steer &nbsp; ${lean} &nbsp; ` +
     `${k('stunt1')}/${k('stunt2')} + lean keys: 16 stunts (in the air; list in Options &gt; Controls) &nbsp; ${k('taunt')} taunt &nbsp; ${k('dumpster')} Big Kahuna Dumpster &nbsp; ${k('shiftDown')}/${k('shiftUp')} shift &nbsp; ${k('toggleAuto')} auto/manual &nbsp; ` +
-    `${k('camera')} camera &nbsp; ${k('reset')} reset / skip wipeout &nbsp; ${k('mute')} mute &nbsp; ${k('toggleRetro')} retro look &nbsp; ${k('help')} hide help` +
+    `${k('camera')} camera (PgUp/PgDn: watch others) &nbsp; ${k('reset')} reset / skip wipeout &nbsp; ${k('mute')} mute &nbsp; ${k('toggleRetro')} retro look &nbsp; ${k('help')} hide help &nbsp; ` +
+    `F5 stats · F6 cues · F7 speedo · F8 scenery · F9 dust · F10 shadows · F11/F12 quality · B names` +
     `<br />Gamepad: ${padInputName(pad.analog.throttle)} gas, ${padInputName(pad.analog.brake)} brake, ${padInputName(pad.analog.steer)} steer, ` +
     `${padInputName(pad.analog.leanFB)} / ${padInputName(pad.analog.leanLR)} lean, ${padButtonName(pad.buttons.stunt1)}/${padButtonName(pad.buttons.stunt2)} + lean: stunts, ` +
     `${padButtonName(pad.buttons.reset)} reset, ${padButtonName(pad.buttons.camera)} camera &nbsp; Rebind in Options &gt; Controls`;
@@ -540,6 +558,101 @@ function stopReplay(reopen = true) {
   hud.replay.hidden = true;
   rig.setMode(session?.config.mode === 'attract' ? 'thrill' : settings.camera);
   if (reopen) menu.reopen(replayFrom);
+}
+
+addEventListener('keydown', (e) => {
+  const toggle = (k: 'stats' | 'cues' | 'speedo' | 'scenery' | 'particles' | 'names', label: string) => {
+    view[k] = !view[k];
+    flashBanner(`${label}<small>${view[k] ? 'on' : 'off'}</small>`, 900);
+    applyView();
+  };
+  if (e.code === 'F5') toggle('stats', 'STATISTICS');
+  else if (e.code === 'F6') toggle('cues', 'VISUAL CUES');
+  else if (e.code === 'F7') toggle('speedo', 'SPEEDOMETER');
+  else if (e.code === 'F8') toggle('scenery', 'SCENERY');
+  else if (e.code === 'F9') toggle('particles', 'PARTICLES');
+  else if (e.code === 'KeyB' && !menu.visible) toggle('names', 'RIDER NAMES');
+  else if (e.code === 'F10') {
+    settings.shadows = !settings.shadows;
+    saveSettings(settings);
+    applySettings(settings);
+    flashBanner(`SHADOWS<small>${settings.shadows ? 'on' : 'off'}</small>`, 900);
+  } else if (e.code === 'F11' || e.code === 'F12') {
+    const steps = [0.5, 0.75, 1];
+    const i = steps.indexOf(settings.resolution);
+    settings.resolution = steps[THREE.MathUtils.clamp((i < 0 ? 2 : i) + (e.code === 'F12' ? 1 : -1), 0, 2)];
+    saveSettings(settings);
+    applySettings(settings);
+    flashBanner(`GRAPHICS<small>${settings.resolution * 100}% resolution</small>`, 900);
+  } else if ((e.code === 'PageUp' || e.code === 'PageDown') && session && !menu.visible && !replay) {
+    const n = session.entries.length;
+    const from = watching ?? session.entries.indexOf(session.star);
+    watching = (from + (e.code === 'PageDown' ? 1 : n - 1)) % n;
+    if (session.human && watching === session.entries.indexOf(session.human)) watching = null;
+    rig.setMode(rig.mode);
+    flashBanner(`WATCHING<small>${(watching === null ? session.human ?? session.star : session.entries[watching]).name}</small>`, 900);
+  } else return;
+  e.preventDefault();
+});
+
+/** Apply the hot-key toggles to the scene and HUD. */
+function applyView() {
+  hud.stats.hidden = !view.stats;
+  hud.speedo.hidden = !view.speedo;
+  dirt.group.visible = view.particles;
+  for (const v of venues.values()) {
+    for (const c of v.root.children) if (!c.userData.terrain) c.visible = view.scenery;
+  }
+}
+
+/** A floating name over a rider, drawn on a little canvas. */
+function nameTag(name: string) {
+  const canvas = document.createElement('canvas');
+  canvas.width = 256;
+  canvas.height = 64;
+  const g = canvas.getContext('2d')!;
+  g.fillStyle = 'rgba(0,0,0,0.55)';
+  g.fillRect(0, 8, 256, 48);
+  g.fillStyle = '#ffb020';
+  g.font = 'bold 30px sans-serif';
+  g.textAlign = 'center';
+  g.fillText(name.toUpperCase(), 128, 43);
+  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(canvas), depthTest: false, transparent: true }));
+  sprite.scale.set(1.9, 0.48, 1);
+  sprite.renderOrder = 9;
+  return sprite;
+}
+
+/** Keep the name tags over the riders (everyone but you). */
+function updateNameTags() {
+  const riders = [
+    ...session.entries.filter((e) => e !== session.human).map((e) => ({ key: e as object, name: e.name, at: e.player.focus ?? e.player.bike.body.translation() })),
+    ...session.remotes.map((r) => ({ key: r as object, name: r.roster.name, at: r.rider.bike.body.translation() })),
+  ];
+  for (const r of riders) {
+    let tag = nameTags.get(r.key);
+    if (!tag) {
+      tag = nameTag(r.name);
+      nameTags.set(r.key, tag);
+      scene.add(tag);
+    }
+    tag.visible = view.names;
+    tag.position.set(r.at.x, r.at.y + 2.4, r.at.z);
+  }
+}
+
+function updateStats(dt: number, bike: { speed: number; grounded: boolean }) {
+  stats.fps += ((dt > 0 ? 1 / dt : 60) - stats.fps) * 0.05;
+  const mph = Math.abs(bike.speed) * 2.237;
+  stats.topSpeed = Math.max(stats.topSpeed, mph);
+  stats.air = bike.grounded ? 0 : stats.air + dt;
+  stats.longestAir = Math.max(stats.longestAir, stats.air);
+  if (!view.stats) return;
+  hud.stats.textContent =
+    `FPS        ${stats.fps.toFixed(0)}\n` +
+    `Top speed  ${stats.topSpeed.toFixed(0)} mph\n` +
+    `Air time   ${stats.air.toFixed(1)} s\n` +
+    `Longest    ${stats.longestAir.toFixed(1)} s`;
 }
 
 // Replay controls: Space pauses, Left/Right skip 5 s, N follows the next rider (C and Esc as in a game).
@@ -717,11 +830,17 @@ function frame(now: number) {
     lobby.sendTag(session.event.ids.get(session.event.it)!, session.event.times());
   }
 
-  const star = session.star;
+  const star = watching !== null && session.entries[watching] ? session.entries[watching] : session.star;
   const bike = star.player.bike;
   sound.update(me && running ? me.player.bike : null, camera);
   updateEventHud();
   updateOffCourse();
+  if (!view.cues) {
+    arrow.visible = false;
+    itMarker.visible = false;
+  }
+  updateNameTags();
+  updateStats(dt, bike);
   const focus = star.player.focus;
   if (running) rig.update(bike, dt, focus);
   const t = focus ?? bike.body.translation();

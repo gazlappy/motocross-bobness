@@ -16,6 +16,7 @@ import {
 import { type StuntDir, activePad } from './input.ts';
 import { STUNT_LIST } from './stunts.ts';
 import { recordsFor } from './records.ts';
+import { CAMERA_MODES, CAMERA_NAMES } from './camera.ts';
 import { DEFAULT_TUNING, ENGINES, type EngineChoice, type Tuning, torqueCurve } from './tuning.ts';
 
 // The front end: main menu over the attract-mode race, game select, options, credits, pause and
@@ -335,7 +336,7 @@ export class Menu {
       this.segmented('Sound', ['on', 'off'], st.muted ? 'off' : 'on', (v) => this.set({ muted: v === 'off' })),
       this.segmented('Speed in', ['mph', 'kmh'], st.units, (v) => this.set({ units: v as Settings['units'] }), (v) => (v === 'kmh' ? 'km/h' : 'mph')),
       this.segmented('Gearbox', ['auto', 'manual'], st.gearbox, (v) => this.set({ gearbox: v as Settings['gearbox'] })),
-      this.segmented('Camera', ['chase', 'far', 'helmet', 'thrill'], st.camera, (v) => this.set({ camera: v as Settings['camera'] })),
+      this.segmented('Camera', CAMERA_MODES, st.camera, (v) => this.set({ camera: v }), (v) => CAMERA_NAMES[v]),
       this.segmented('Ground', ['realistic', 'retro'], st.retro ? 'retro' : 'realistic', (v) => this.set({ retro: v === 'retro' })),
       this.segmented('Bike model', ['crf450', 'classic'], st.bikeModel, (v) => this.set({ bikeModel: v as Settings['bikeModel'] }), (v) => (v === 'crf450' ? 'CRF 450' : 'Classic')),
       this.segmented('Shadows', ['on', 'off'], st.shadows ? 'on' : 'off', (v) => this.set({ shadows: v === 'on' })),
