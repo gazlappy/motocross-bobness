@@ -1,6 +1,6 @@
-// Realistic handling: brake hard mid-turn and the rear should lock and step out of the turn (turning right, the back end
+// Brake hard mid-turn: the rear should lock and step out of the turn (turning right, the back end
 // kicks out left) without throwing the rider; a gentle brake shouldn't slide at all. Classic
-// (the original's way) never slides round: the back end stays in line. Flat ground.
+// slides too, but never spins round. Flat ground.
 // Usage: node scripts/brake-slide-test.ts
 import RAPIER from '@dimforge/rapier3d-compat';
 import * as THREE from 'three';
@@ -69,7 +69,7 @@ for (const assist of [false, true]) {
   const soft = run(assist, 0.5, 0.6);
   check(soft.lockedFor === 0 && soft.maxOut < 4, `${name}: a gentle brake doesn't slide (swing ${soft.maxOut.toFixed(1)} deg)`);
   const classic = run(assist, 1, 0.6, false);
-  check(classic.lockedFor === 0 && classic.maxOut < 8 && !classic.crashed, `Classic ${name}: a hard brake mid-turn stays in line (swing ${classic.maxOut.toFixed(1)} deg)`);
+  check(classic.maxOut > 6 && classic.maxOut < 60 && !classic.crashed, `Classic ${name}: a hard brake mid-turn slides without spinning round (swing ${classic.maxOut.toFixed(1)} deg)`);
 }
 
 console.log(failed ? `\n${failed} brake check(s) FAILED` : '\nAll brake checks passed.');

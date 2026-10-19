@@ -97,15 +97,14 @@ for (const realistic of [false, true]) {
       check(!bike.crashCause && worst < 15, `${name}: a full-throttle launch goes straight (${worst.toFixed(1)} deg, ${bike.speed.toFixed(1)} m/s)`);
     }
 
-    // Hard brake in a right-hander: realistic slides the rear; classic holds its line.
+    // Hard rear-brake slide in a right-hander still works, without spinning round.
     {
       const { bike, run, hold } = setup(realistic, assist, 15);
       run(1.6, (b) => ({ ...idle, steer: 0.6, throttle: hold(15)(b) }));
       const before = noseVsTravel(bike);
       let out = 0;
       run(1.2, () => ({ ...idle, steer: 0.6, brake: 1 }), (b) => (out = Math.max(out, noseVsTravel(b) - before)));
-      if (realistic) check(out > 6 && !bike.crashCause && upright(bike) > 0.6, `${name}: a hard brake mid-turn slides the back end out and stays up (${out.toFixed(1)} deg, ${bike.crashCause})`);
-      else check(Math.abs(out) < 8 && !bike.crashCause && upright(bike) > 0.6, `${name}: a hard brake mid-turn stays in line, as in the original (${out.toFixed(1)} deg)`);
+      check(out > 6 && out < 60 && !bike.crashCause && upright(bike) > 0.6, `${name}: a hard brake mid-turn slides the back end out, doesn't spin, and stays up (${out.toFixed(1)} deg, ${bike.crashCause})`);
     }
   }
 }
