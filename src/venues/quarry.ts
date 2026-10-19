@@ -5,8 +5,10 @@ import { type TerrainPalette, createTerrainMesh } from '../terrain.ts';
 import { QUARRY_LOOK } from '../terrainLook.ts';
 import { type Atmosphere, type Ground, SUNNY, type Venue, onGround, rockColliders, scatterRocks, venueColliders } from '../venue.ts';
 
-// The Stunt Quarry: "monstrous arenas of hills optimally placed for stunt jumping". Big kickers aimed
-// at landing mounds, mesas, a volcano and high banks round the edge that lead to the cannon.
+// The Stunt Quarry, laid out like the original's: a quarry pit sunk into the middle of a big open
+// map (about 1.5 km across), with big kickers aimed at landing mounds, mesas and a volcano down in the
+// pit, steep embankments and three ramp roads up out of it, open country beyond, and the bowl walls
+// at the edge that lead to the cannon.
 
 const smoothstep = (e0: number, e1: number, x: number) => {
   const t = Math.min(1, Math.max(0, (x - e0) / (e1 - e0)));
@@ -57,24 +59,41 @@ const STONE: TerrainPalette = {
   base: 0xb9a78e, grass: 0x8a8f5a, dirt: 0x9c8466, track: 0x9c8466, rock: 0x8f8577, grassAmount: 0.25, dirtAmount: 0.7,
 };
 
-const HAZE: Atmosphere = { ...SUNNY, sky: 0xa3c6e3, fog: { color: 0xd3d6d6, near: 160, far: 650 } };
+const HAZE: Atmosphere = { ...SUNNY, sky: 0xa3c6e3, fog: { color: 0xd3d6d6, near: 220, far: 950 }, far: 1700 };
+
+/** The pit: its average radius and how far it's sunk below the country round it (m). */
+const PIT = { r: 185, depth: 24 };
+/** Across the map inside the bowl walls (m): the original's open maps are about 1.5 km overall. */
+const ARENA = 1300;
+const WALL = { height: 40, width: 85 };
+const SIZE = ARENA + 2 * (WALL.width + EDGE_PLATEAU);
 
 export function quarryGround(): Ground {
   const hm = buildHeightmap({
-    size: 520 + 2 * EDGE_PLATEAU,
-    cells: (520 + 2 * EDGE_PLATEAU) / 1.25,
+    size: SIZE,
+    cells: Math.round(SIZE / 2),
     seed: 11,
     natural: (noise, x, z) => {
-      let h = noise.fbm(x / 140, z / 140, 4) * 3 + noise.fbm(x / 20, z / 20, 2) * 0.4;
-      for (const k of KICKERS) h += kickerHeight(k, x, z);
-      for (const m of MOUNDS) h += moundHeight(m, x, z);
-      const d = Math.hypot(x - VOLCANO.x, z - VOLCANO.z);
-      const cone = VOLCANO.height * Math.pow(Math.max(0, 1 - d / VOLCANO.r), 1.3);
-      h += cone - 6 * (1 - smoothstep(VOLCANO.crater * 0.4, VOLCANO.crater, d));
-      return h;
+      // Down in the pit: worked-flat floor with the kickers, mounds and volcano.
+      let floor = noise.fbm(x / 140, z / 140, 4) * 3 + noise.fbm(x / 20, z / 20, 2) * 0.4;
+      for (const k of KICKERS) floor += kickerHeight(k, x, z);
+      for (const m of MOUNDS) floor += moundHeight(m, x, z);
+      const dv = Math.hypot(x - VOLCANO.x, z - VOLCANO.z);
+      const cone = VOLCANO.height * Math.pow(Math.max(0, 1 - dv / VOLCANO.r), 1.3);
+      floor += cone - 6 * (1 - smoothstep(VOLCANO.crater * 0.4, VOLCANO.crater, dv));
+      // Up top: rolling open country.
+      const country = PIT.depth + noise.fbm(x / 320 + 7, z / 320 - 3, 4) * 20 +
+        Math.max(0, noise.fbm(x / 110 - 5, z / 110 + 9, 3)) * 14 + noise.fbm(x / 18, z / 18, 2) * 0.5;
+      // The pit's edge: an irregular rim, steep escarpments for the most part, with three ramp roads
+      // climbing gently out of it.
+      const d = Math.hypot(x, z), a = Math.atan2(z, x);
+      const rim = PIT.r + noise.fbm(Math.cos(a) * 1.3 + 20, Math.sin(a) * 1.3, 3) * 30;
+      const ramp = Math.pow(Math.max(0, Math.cos(3 * (a - 0.4))), 6);
+      const bank = 26 + 75 * ramp;
+      const up = smoothstep(rim - bank / 2, rim + bank / 2, d);
+      return floor + (country - floor) * up;
     },
-    // High banks all round: ride up them for air, or over the top for the cannon.
-    edgeWall: { height: 40, width: 85, plateau: EDGE_PLATEAU },
+    edgeWall: { ...WALL, plateau: EDGE_PLATEAU },
     track: null,
     trackBlend: 0,
     flats: [{ x: 0, z: 0, r: 30 }],
@@ -87,7 +106,7 @@ export function buildQuarry(world: RAPIER.World): Venue {
   const ground = quarryGround();
   const hm = ground.hm;
   const root = new THREE.Group();
-  const rocks = scatterRocks(hm, 160, 0x7d7468, [{ x: 0, z: 0, r: 40 }], 99);
+  const rocks = scatterRocks(hm, 700, 0x7d7468, [{ x: 0, z: 0, r: 40 }], 99);
   root.add(createTerrainMesh(hm, STONE, 7, QUARRY_LOOK), rocks);
   return {
     ...ground,

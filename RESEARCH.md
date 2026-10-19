@@ -249,6 +249,20 @@ which look like misprints for back+right and back+left):
 - Uphill: weight forward and centred. Downhill: weight back. After take-off on doubles: weight forward.
 - Uneven landings: weight slightly forward, then back. Level landings: centred.
 
+### Open maps and boundaries
+- Every outdoor map (Nationals, Baja, Stunt Quarry) uses the same big terrain format; Baja and
+  Stunt Quarry even share terrains (`Baja00.trn` is the Quarry00 ground). Supercross/Season arenas
+  are a smaller format (257 tiles vs ~870).
+- Baja waypoints (12 routes, `.WPT`) sit between ~240 m and ~1400 m on both axes: the open maps are
+  roughly **1.5 km across**, and routes keep **~240 m clear of the map edge** (where the bowl walls
+  are). Routes run **2.3-7.3 km** with **8-18 waypoints**, legs **30-890 m** apart. Ours: one
+  ~2.3 km route, 8 waypoints, on a 1.1 km arena.
+- Each quarry terrain also has a hidden closed path (`QUARRY*.DAT`, 1.4-2.9 km; `DUNES.DAT` 6 km)
+  wound through a **~250-350 m** central area: the quarry pit sits in the middle of the big open
+  map, with open country between it and the walls. Our Stunt Quarry is a 350 m arena on its own.
+- `RANDOM*.RSC` files set up a random-waypoint Baja mode (the game picks the route).
+- Wall heights and shapes: still in the compressed terrain tiles.
+
 ## 6. Still to find
 - Terrain heights (the .TRN tile compression), which would give the walls and hills exactly.
 - Supercross track layouts (the track editor's `.TRK`/`.TER` files are uncompressed and look decodable).
