@@ -103,13 +103,14 @@ for (const realistic of [false, true]) {
       run(1.6, (b) => ({ ...idle, steer: 0.6, throttle: hold(15)(b) }));
       const before = noseVsTravel(bike);
       let out = 0;
-      run(1.2, () => ({ ...idle, steer: 0.6, brake: 1 }), (b) => (out = Math.max(out, noseVsTravel(b) - before)));
+      // A stopped bike has no direction of travel to measure the swing against.
+      run(1.2, () => ({ ...idle, steer: 0.6, brake: 1 }), (b) => { if (Math.abs(b.speed) > 2) out = Math.max(out, noseVsTravel(b) - before); });
       check(out > 6 && out < 60 && !bike.crashCause && upright(bike) > 0.6, `${name}: a hard brake mid-turn slides the back end out, doesn't spin, and stays up (${out.toFixed(1)} deg, ${bike.crashCause})`);
     }
   }
 }
 
-// The garage: every engine pulls and they differ; soft springs sag more; more traction turns tighter.
+// The garage: every engine pulls and they differ; soft springs sag more; more traction slides less.
 {
   const launch = (tuning: Partial<Tuning>) => {
     const { bike, run } = setup(false, false, 0);
@@ -130,13 +131,15 @@ for (const realistic of [false, true]) {
   };
   check(sag(-2) > sag(2) + 0.01, `soft front springs sag more (${(sag(-2) * 100).toFixed(1)} vs ${(sag(2) * 100).toFixed(1)} cm)`);
 
-  const turnRate = (traction: number) => {
+  // As the original's manual has it: more traction keeps the rear tracking (less sliding in a hard turn).
+  const tailSlide = (traction: number) => {
     const { bike, run, hold } = setup(false, false, 12);
     bike.setTuning({ ...DEFAULT_TUNING, traction });
-    run(2, (b) => ({ ...idle, steer: 1, throttle: hold(12)(b) }));
-    return Math.abs(bike.body.angvel().y);
+    let most = 0;
+    run(5, (b) => ({ ...idle, steer: 1, throttle: hold(12)(b) }), (b) => (most = Math.max(most, Math.abs(b.tailOut))));
+    return THREE.MathUtils.radToDeg(most);
   };
-  check(turnRate(2) > turnRate(-2) * 1.05, `more traction turns tighter (${turnRate(2).toFixed(2)} vs ${turnRate(-2).toFixed(2)} rad/s)`);
+  check(tailSlide(2) < tailSlide(-2) - 3, `more traction, less rear slide in a hard turn (${tailSlide(2).toFixed(0)} vs ${tailSlide(-2).toFixed(0)} deg)`);
 }
 
 console.log(failed ? `\n${failed} handling check(s) FAILED` : '\nAll handling checks passed.');

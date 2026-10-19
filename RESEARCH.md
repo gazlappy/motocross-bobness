@@ -302,6 +302,12 @@ what the released game ran. Reading the physics code:
   traction slider, 0.85-1.0), and 0.6·sinθ + 0.15·cosθ at the rear. The front grips sideways ten
   times harder than the rear. The force pushes against the slide, so a sliding bike scrubs speed
   fast: the manual's power slide (brake, then gas to swing the tail round).
+- **Watched in the original** (Supercross practice, keyboard, recorded every 0.25 s, 2026-10-19): full
+  throttle and full lock from a crawl peaks near 27 mph then settles at about 17-18 mph, going right round
+  every ~3.7 s (about 1.3 g on a ~4.5 m radius); turning at 45 mph the bike pivots and scrubs down. Full
+  lock doesn't run wide: the slide drags the speed off. Ours (classic): settles at 19 mph, round every
+  ~5.3 s, from a crawl or from 45 mph (`node scripts/corner-test.ts`). Turning harder than that made
+  the AI and beginner riders take off from jumps leaned over.
 - Not yet traced: exactly how the friction becomes yaw (what it's scaled by, and whether velocity
   is also turned towards the wheels directly). Following it further means reading the main
   physics step (around 0x4A7800-0x4A8640).

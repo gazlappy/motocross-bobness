@@ -56,16 +56,21 @@ const DRAG_CDA = 0.42;
 /** Classic, as in the original: the tyres grip far harder sideways than along the wheel, the front much
  * harder than the rear (the original's front 6.0, rear 0.6), so the bike turns on its bars and the back
  * end can come round. Easy keeps the rear closer to the front. */
-const FRONT_SIDE_MU = 3.2;
-const REAR_SIDE_MU = 2.4;
-const EASY_FRONT_SIDE_MU = 2.9;
-const EASY_REAR_SIDE_MU = 2.4;
+const FRONT_SIDE_MU = 2.6;
+const REAR_SIDE_MU = 2.9;
+const EASY_FRONT_SIDE_MU = 2.4;
+const EASY_REAR_SIDE_MU = 3.0;
 /** Classic: full lock, the original's 36 degrees times its default steering sensitivity (0.8). */
 const CLASSIC_LOCK = THREE.MathUtils.degToRad(29);
-/** Classic: a steady turn at full lock asks the rear for this share of its sideways grip (the rest is for drive). */
-const CLASSIC_TURN_SHARE = 0.75;
-/** Classic: the original sets the lean directly, steer x 0.05 x speed in ft/s (radians), at least 5 degrees. */
-const CLASSIC_LEAN_PER_FTS = 0.05;
+/** Classic, as in the original: steering asks for the full lock at any speed; the turn holds this much
+ * sideways acceleration, and asking more scrubs the speed off (the original's tyres dragged against a
+ * slide, up to 6 times the load), so a held full lock settles into a tight circle at about 18 mph. */
+const CLASSIC_TURN_ACCEL = 1.35 * GRAVITY;
+const CLASSIC_SCRUB = 0.6;
+const CLASSIC_SCRUB_MAX = 1.1 * GRAVITY;
+/** Classic: the most a turn asks of the tyres; past CLASSIC_TURN_ACCEL the difference is scrubbed off as speed. */
+const CLASSIC_TURN_ASK = 1.0 * GRAVITY;
+/** Classic: the original sets the lean directly (rate-limited, 40 degrees at most), at least 5 degrees when steering. */
 const CLASSIC_MIN_LEAN = THREE.MathUtils.degToRad(5);
 /** ...but only on its wheels: pitched further than this from the ground (sine), it's left to fall. */
 const CLASSIC_LEAN_MAX_PITCH = Math.sin(0.6);
@@ -368,8 +373,13 @@ export class Bike {
 
     // Steering lock narrows with speed so the turn never asks for more grip than the tyres have.
     const mu = (this.realistic ? REAL_MU : this.sideMu(false)) * this.tune.grip;
-    const gripLimited = Math.atan(((this.realistic ? 0.85 : CLASSIC_TURN_SHARE) * mu * GRAVITY * WHEELBASE) / Math.max(1, absSpeed * absSpeed));
-    const maxSteer = Math.min(this.realistic ? 0.62 : CLASSIC_LOCK, gripLimited);
+    const gripLimited = Math.atan((0.85 * mu * GRAVITY * WHEELBASE) / Math.max(1, absSpeed * absSpeed));
+    const maxSteer = this.realistic
+      ? Math.min(0.62, gripLimited)
+      : this.rearLocked
+        // Rear locked and sliding: steer only as hard as the tyres hold, or the slide swings right round.
+        ? Math.min(CLASSIC_LOCK, Math.atan((0.85 * TYRE_MU * GRAVITY * WHEELBASE) / Math.max(1, absSpeed * absSpeed)))
+        : Math.min(CLASSIC_LOCK, Math.atan((CLASSIC_TURN_ASK * this.tune.grip * WHEELBASE) / Math.max(1, absSpeed * absSpeed)));
     this.requestedSteer = c.steer * maxSteer;
     // Easy: straighten up on a steep climb (a jump face), as a rider would before taking off.
     if (this.assist && this.grounded) {
@@ -604,6 +614,7 @@ export class Bike {
     }
 
     this.grounded = groundedCount > 0;
+    if (this.grounded && !this.realistic) this.classicScrub(dt);
     this.airTime = this.grounded ? 0 : this.airTime + dt;
 
     // Aero drag (none in the cannon's cartoon flight, or it would fall short).
@@ -809,7 +820,7 @@ export class Bike {
       const real = this.realistic;
       const gyro = real ? c.throttle * 0.9 - c.brake * 1.8 : (c.throttle - c.brake) * 0.5;
       torque.addScaledVector(_right, INERTIA.x * ((real ? -4 : -5) * this.lean.y + gyro - 1.2 * pitchRate));
-      torque.addScaledVector(_fwd, INERTIA.z * (5 * this.lean.x - (real ? 1.5 : 3) * roll - 2 * rollRate));
+      torque.addScaledVector(_fwd, INERTIA.z * (5 * this.lean.x - (real ? 1.5 : 7) * roll - (real ? 2 : 3.5) * rollRate));
       torque.addScaledVector(_up, -INERTIA.y * (real ? 1.2 : 2.5) * c.steer);
       // Spinning wheels and the rider keep the bike pointing where it's going: damp yaw, and turn the
       // nose gently towards the direction of travel.
@@ -834,12 +845,13 @@ export class Bike {
     if (this.grounded && !this.realistic && this.onItsWheels()) this.setClassicLean(roll, dt);
   }
 
-  /** Classic, as in the original: the lean isn't balanced, it's set. Steering asks for a lean that grows
-   * with speed (full lean from about 10 mph), and the bike rolls straight to it at up to 120 degrees/s. */
+  /** Classic, as in the original: the lean isn't balanced, it's set, to suit the turn the front wheel is
+   * making, and the bike rolls straight to it at up to 120 degrees/s. */
   private setClassicLean(roll: number, dt: number) {
     const body = this.body;
     const share = this.steerShare;
-    let want = share * CLASSIC_LEAN_PER_FTS * Math.abs(this.speed) * 3.281;
+    // Leaned for the turn the front wheel is making (at least a little whenever steering).
+    let want = Math.atan2(this.speed * this.speed * Math.tan(this.steerAngle), GRAVITY * WHEELBASE);
     if (share !== 0 && Math.abs(want) < CLASSIC_MIN_LEAN * Math.abs(share)) want = CLASSIC_MIN_LEAN * share;
     const maxLean = this.assist ? MAX_LEAN * EASY_LEAN : MAX_LEAN;
     want = THREE.MathUtils.clamp(want + this.lean.x * 0.2, -maxLean, maxLean);
@@ -860,6 +872,23 @@ export class Bike {
   private onItsWheels() {
     const w = this.wheels[0].grounded ? this.wheels[0] : this.wheels[1];
     return Math.abs(_fwd.dot(w.surfaceNormal)) < CLASSIC_LEAN_MAX_PITCH;
+  }
+
+  /** Classic: a turn tighter than the speed allows scrubs the speed off, on the bike and rider alike. */
+  private classicScrub(dt: number) {
+    const v = Math.abs(this.speed);
+    if (v < 2) return;
+    // What the lock the rider is holding asks for (the wheel itself turns less at speed, to stay stable).
+    const asked = (v * v * Math.tan(CLASSIC_LOCK * Math.abs(this.steerShare))) / WHEELBASE;
+    const decel = Math.min(CLASSIC_SCRUB_MAX, CLASSIC_SCRUB * Math.max(0, asked - CLASSIC_TURN_ACCEL));
+    if (decel <= 0) return;
+    for (const b of [this.body, this.rider.body]) {
+      const lv = b.linvel();
+      const speed = Math.hypot(lv.x, lv.y, lv.z);
+      if (speed < 1e-3) continue;
+      const k = (-b.mass() * Math.min(decel * dt, speed)) / speed;
+      b.applyImpulse({ x: lv.x * k, y: 0, z: lv.z * k }, true);
+    }
   }
 
   /** Classic sideways grip of the front or rear tyre (as a friction coefficient). */

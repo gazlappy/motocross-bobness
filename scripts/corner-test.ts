@@ -81,6 +81,44 @@ function hairpin(speed: number, brakeFor: number) {
   return { t, dist, swing: THREE.MathUtils.radToDeg(swing), crash: bike.crashCause };
 }
 
+/**
+ * Full throttle and full lock held, as filmed in the original (Supercross, 2026-10-19): from a crawl it
+ * peaks near 27 mph, then settles at about 17-18 mph going round every ~3.7 s; from speed it scrubs down.
+ */
+function donut(speed: number) {
+  const world = new RAPIER.World({ x: 0, y: -9.81, z: 0 });
+  world.timestep = DT;
+  world.createCollider(RAPIER.ColliderDesc.heightfield(4, 4, new Float32Array(25), { x: 2000, y: 1, z: 2000 }));
+  const bike = new Bike(world, new THREE.Vector3(0, 1, 0), 0);
+  bike.realistic = realistic;
+  bike.assist = easy;
+  for (let i = 0; i < 60; i++) {
+    bike.step(idle, DT);
+    world.step();
+  }
+  bike.body.setLinvel({ x: 0, y: 0, z: -speed }, true);
+  bike.rider.snapTo(bike.body);
+  const mph: string[] = [];
+  let turned = 0, prev = heading(bike), lapStart = 0, lap = 0, peak = 0;
+  for (let i = 1; i <= 6 / DT; i++) {
+    bike.step({ ...idle, steer: Math.min(1, i * DT * 6), throttle: 1 }, DT);
+    world.step();
+    const h = heading(bike);
+    turned += Math.abs(Math.atan2(Math.sin(h - prev), Math.cos(h - prev)));
+    prev = h;
+    peak = Math.max(peak, bike.speed);
+    if (i % 120 === 0) mph.push((bike.speed * 2.237).toFixed(0));
+    if (i * DT > 2 && !lapStart) lapStart = turned;
+    if (i * DT >= 6) lap = (2 * Math.PI) / ((turned - lapStart) / 4);
+    if (bike.crashCause) break;
+  }
+  return { mph, peak: peak * 2.237, lap, crash: bike.crashCause };
+}
+
+for (const start of [2, 20]) {
+  const r = donut(start);
+  console.log(`full gas + full lock from ${(start * 2.237).toFixed(0)} mph: speed each second ${r.mph.join(', ')} mph (peak ${r.peak.toFixed(0)}), round in ${r.lap.toFixed(1)} s once settled${r.crash ? `, crashed: ${r.crash}` : ''}  [original: peak ~27, settles 17-18, ~3.7 s]`);
+}
 for (const mph of [10, 20, 30, 40, 50]) {
   const r = corner(mph / 2.237);
   console.log(`${mph} mph: 90 deg in ${r.t90.toFixed(2)} s, ${r.g.toFixed(2)} g, ends at ${(r.speed * 2.237).toFixed(0)} mph, rear slides ${r.swing.toFixed(0)} deg at most${r.crash ? `, crashed: ${r.crash}` : ''}`);

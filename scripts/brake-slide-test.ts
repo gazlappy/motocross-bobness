@@ -47,8 +47,11 @@ function run(assist: boolean, brake: number, steer: number, realistic = true) {
   for (let i = 0; i < 1.2 / DT; i++) {
     bike.step({ ...idle, steer, brake }, DT);
     world.step();
-    maxOut = Math.max(maxOut, noseVsTravel(bike) - before);
-    minOut = Math.min(minOut, noseVsTravel(bike) - before);
+    // A stopped bike has no direction of travel to measure the swing against.
+    if (Math.abs(bike.speed) > 2) {
+      maxOut = Math.max(maxOut, noseVsTravel(bike) - before);
+      minOut = Math.min(minOut, noseVsTravel(bike) - before);
+    }
     if (bike.rearLocked) locked++;
   }
   const r = bike.body.rotation();
@@ -69,7 +72,7 @@ for (const assist of [false, true]) {
   const soft = run(assist, 0.5, 0.6);
   check(soft.lockedFor === 0 && soft.maxOut < 4, `${name}: a gentle brake doesn't slide (swing ${soft.maxOut.toFixed(1)} deg)`);
   const classic = run(assist, 1, 0.6, false);
-  check(classic.maxOut > 6 && classic.maxOut < 60 && !classic.crashed, `Classic ${name}: a hard brake mid-turn slides without spinning round (swing ${classic.maxOut.toFixed(1)} deg)`);
+  check(classic.maxOut > 6 && classic.maxOut < 60 && !classic.crashed, `Classic ${name}: a hard brake mid-turn slides without spinning round (swing ${classic.maxOut.toFixed(1)} deg, ${classic.speed.toFixed(1)} m/s after)`);
 }
 
 console.log(failed ? `\n${failed} brake check(s) FAILED` : '\nAll brake checks passed.');
