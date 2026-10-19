@@ -18,6 +18,7 @@ import { STUNT_LIST } from './stunts.ts';
 import { recordsFor } from './records.ts';
 import { trackChoices, trackFor } from './sxLibrary.ts';
 import { TrackEditor } from './editor.ts';
+import { YOU as SEASON_YOU, endSeason, loadSeason, newSeason, roundName, seasonOver, seasonStandings, stadiumName } from './season.ts';
 import type { SxTrack } from './sxTrack.ts';
 import { STADIUMS, type StadiumId } from './venues/supercross.ts';
 import { CAMERA_MODES, CAMERA_NAMES } from './camera.ts';
@@ -36,13 +37,17 @@ export interface MenuHandlers {
   careerEvent(): void;
   /** Leave a finished career event for the career screen. */
   toCareer(): void;
+  /** Ride the 1998 Season's next round. */
+  seasonRound(): void;
+  /** Leave a finished Season round for the Season screen. */
+  toSeason(): void;
   /** Leave the multiplayer room (from a game or the lobby). */
   leaveRoom(): void;
   /** Watch a replay of the game so far. */
   replay(): void;
 }
 
-type Screen = 'main' | 'select' | 'options' | 'credits' | 'pause' | 'results' | 'career' | 'garage' | 'tuning' | 'multiplayer' | 'lobby' | 'controls' | 'editor';
+type Screen = 'main' | 'select' | 'options' | 'credits' | 'pause' | 'results' | 'career' | 'garage' | 'tuning' | 'multiplayer' | 'lobby' | 'controls' | 'editor' | 'season';
 
 interface Mode {
   id: string;
@@ -88,7 +93,8 @@ export class Menu {
   private mode: Mode = MODES[0];
   private resultsHtml = '';
   private resultsTitle = 'Results';
-  private resultsCareer = false;
+  /** Where Continue goes from the results: a career or Season event's screen, or nowhere. */
+  private resultsNext: 'career' | 'season' | null = null;
   private career: Career;
   private tier = 0;
   private confirming = '';
@@ -133,16 +139,21 @@ export class Menu {
     this.open('main', true);
   }
 
-  showResults(tableHtml: string, title = 'Results', career = false) {
+  showResults(tableHtml: string, title = 'Results', next: 'career' | 'season' | null = null) {
     this.resultsHtml = tableHtml;
     this.resultsTitle = title;
-    this.resultsCareer = career;
+    this.resultsNext = next;
     this.open('results', true);
   }
 
   /** Back to a screen after a replay. */
   reopen(screen: 'results' | 'pause') {
     this.open(screen, true);
+  }
+
+  showSeason() {
+    this.open('main', true);
+    this.open('season');
   }
 
   showCareer() {
@@ -225,6 +236,7 @@ export class Menu {
     else if (s === 'garage') this.renderGarage();
     else if (s === 'tuning') this.renderTuning();
     else if (s === 'editor') this.renderEditor();
+    else if (s === 'season') this.renderSeason();
     this.focusables()[0]?.focus();
   }
 
@@ -242,6 +254,7 @@ export class Menu {
 
   private renderMain() {
     this.button('Career', () => this.open('career'));
+    this.button('1998 Season', () => this.open('season'));
     this.button('Single Event', () => this.open('select'));
     this.button('Multiplayer', () => this.open(this.lobby.room ? 'lobby' : 'multiplayer'));
     this.button('Track Editor', () => this.open('editor'));
@@ -399,8 +412,9 @@ export class Menu {
   private renderResults() {
     this.title(this.resultsTitle);
     this.panel.append(el('div', 'results-table', this.resultsHtml));
-    if (this.resultsCareer) {
-      this.button('Continue', () => this.h.toCareer(), 'menu-btn go');
+    if (this.resultsNext) {
+      const next = this.resultsNext;
+      this.button('Continue', () => (next === 'career' ? this.h.toCareer() : this.h.toSeason()), 'menu-btn go');
       this.button('Watch replay', () => this.h.replay());
       return;
     }
@@ -563,6 +577,46 @@ export class Menu {
   }
 
   /** The original's garage: engine curve, springs and damping front and rear, and traction. */
+  /** The 1998 Season: fifteen supercross rounds, city to city, for the championship. */
+  private renderSeason() {
+    this.title('1998 Season');
+    const s = loadSeason();
+    if (!s) {
+      this.panel.append(el('p', 'menu-foot controls-blurb',
+        'Fifteen rounds of supercross, a week apart, from San Diego to Dallas, against the same six riders. ' +
+        'Points for every finish (25 for a win); the most after Week 15 takes the championship. Each city has its own track.'));
+      this.button('Start the season', () => {
+        newSeason(this.settings.colour);
+        this.render();
+      }, 'menu-btn go');
+      this.button('Back', () => this.back(), 'menu-btn small');
+      return;
+    }
+    const over = seasonOver(s);
+    const table = seasonStandings(s);
+    this.panel.append(el('h3', 'career-head', over
+      ? `Final standings: you're ${ordinal(table.indexOf(SEASON_YOU) + 1)}${table[0] === SEASON_YOU ? '. Champion!' : ''}`
+      : `Next: ${roundName(s.round)} · ${stadiumName(s.round)} (round ${s.round + 1} of 15)`));
+    this.panel.append(el('div', 'results-table', `<table><tr><th></th><th>Rider</th><th>Points</th></tr>${
+      table.map((name, i) => `<tr class="${name === SEASON_YOU ? 'me' : ''}"><td>${i + 1}</td><td>${name}</td><td>${s.points[name]}</td></tr>`).join('')
+    }</table>`));
+    if (s.results.length) {
+      this.panel.append(el('p', 'menu-foot controls-blurb', `Your finishes: ${s.results.map((p, i) => `wk${i + 1} ${ordinal(p)}`).join(' · ')}`));
+    }
+    if (!over) {
+      this.button(`Ride week ${s.round + 1}: ${roundName(s.round).split(' - ')[1]}`, () => {
+        this.hide();
+        this.h.seasonRound();
+      }, 'menu-btn go');
+    }
+    this.button(over ? 'Start a new season' : 'Start over', () => {
+      endSeason();
+      newSeason(this.settings.colour);
+      this.render();
+    }, 'menu-btn small');
+    this.button('Back', () => this.back(), 'menu-btn small');
+  }
+
   private editor = new TrackEditor();
 
   /** The supercross track editor; riding or racing a track starts a game on it. */

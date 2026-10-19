@@ -21,6 +21,7 @@ import { DirtParticles } from './particles.ts';
 import { type EventPayout, SEASON, TIERS, eventConfig, loadCareer, money, recordEvent } from './career.ts';
 import { TagGame } from './tag.ts';
 import { recordFinish, recordLap, recordsFor } from './records.ts';
+import { loadSeason, recordRound, roundConfig, roundName, seasonOver } from './season.ts';
 import { ReplayPlayer } from './replay.ts';
 import { Lobby } from './net/lobby.ts';
 import type { NetSetup, RosterEntry } from './net/protocol.ts';
@@ -226,6 +227,9 @@ let lastConfig: SessionConfig = ATTRACT;
 const career = loadCareer();
 /** The game running is a career event: its result goes on the career. */
 let careerRun = false;
+/** The game running is a 1998 Season round. */
+let seasonRun = false;
+let seasonSummary = '';
 let careerSummary = '';
 /** Track records shown under the results. */
 let recordSummary = '';
@@ -329,6 +333,12 @@ function attachHud() {
     // Multiplayer: our riders' finishes are ours to announce.
     const local = session.entries.find((e) => e.racer === r && e.netId);
     if (local && !(event instanceof TagGame)) lobby.sendFinish(local.netId!, r.finishTime);
+    if (r.human && seasonRun && event instanceof Race) {
+      seasonRun = false;
+      const res = recordRound(loadSeason()!, event.standings().map((x) => x.name));
+      seasonSummary = `<div class="career-payout"><p>Week ${res.week}: ${ordinal(res.place)} place: <b>+${res.points} pts</b></p>` +
+        `<p>Season: <b>${ordinal(res.standing)}</b> on <b>${res.total} pts</b>${res.over ? ' · <b>season over</b>' : ''}</p></div>`;
+    }
     if (r.human && careerRun) {
       careerRun = false;
       const order = event instanceof StuntChallenge ? null : event.standings().map((x) => x.name);
@@ -348,11 +358,11 @@ function attachHud() {
       sound.cheer(1);
       resultsTimer = window.setTimeout(() => {
         const t = tableHtml(event.results());
-        menu.showResults(t.html + recordSummary + careerSummary, t.title, careerSummary !== '');
+        menu.showResults(t.html + recordSummary + careerSummary + seasonSummary, t.title, resultsNext());
       }, 2700);
     } else if (menu.screenName === 'results') {
       const t = tableHtml(event.results());
-      menu.showResults(t.html + recordSummary + careerSummary, t.title, careerSummary !== '');
+      menu.showResults(t.html + recordSummary + careerSummary + seasonSummary, t.title, resultsNext());
     }
   };
 }
@@ -370,6 +380,11 @@ function recordsHtml(track: string, laps: number | null, newRecord: boolean) {
   const best = laps === null ? r.baja : r.race?.[String(laps)];
   if (best !== undefined) lines.push(`${laps === null ? 'Course' : `${laps}-lap`} record: <b>${clockText(best)}</b>${newRecord ? ' · <b>NEW!</b>' : ''}`);
   return lines.length ? `<div class="career-payout">${lines.map((l) => `<p>${l}</p>`).join('')}</div>` : '';
+}
+
+/** Where the results' Continue button leads. */
+function resultsNext() {
+  return careerSummary ? 'career' : seasonSummary ? 'season' : null;
 }
 
 function announceTag(it: Racer, by: Racer | null) {
@@ -514,13 +529,17 @@ const lobby = new Lobby();
 const menu = new Menu(document.getElementById('menu')!, settings, career, lobby, bindings, {
   start(config) {
     careerRun = false;
+    seasonRun = false;
     careerSummary = '';
+    seasonSummary = '';
     countdownCaption = '';
     lastConfig = config;
     void begin(config);
   },
   careerEvent() {
     careerSummary = '';
+    seasonSummary = '';
+    seasonRun = false;
     lastConfig = eventConfig(career);
     const s = career.season!;
     countdownCaption = `<small>${TIERS[s.tier].name} · ${SEASON[s.next].name} (${s.next + 1}/${SEASON.length})</small>`;
@@ -532,16 +551,35 @@ const menu = new Menu(document.getElementById('menu')!, settings, career, lobby,
     await begin(ATTRACT);
     menu.showCareer();
   },
+  seasonRound() {
+    const s = loadSeason();
+    if (!s || seasonOver(s)) return;
+    careerRun = false;
+    careerSummary = '';
+    seasonSummary = '';
+    lastConfig = roundConfig(s, settings);
+    countdownCaption = `<small>1998 Season · ${roundName(s.round)} (${s.round + 1}/15)</small>`;
+    void begin(lastConfig).then(() => {
+      seasonRun = true;
+    });
+  },
+  async toSeason() {
+    seasonSummary = '';
+    await begin(ATTRACT);
+    menu.showSeason();
+  },
   resume() {},
   restart() {
     // A career event restarted from the pause menu still counts; one already banked doesn't run again.
-    const wasCareer = careerRun;
+    const wasCareer = careerRun, wasSeason = seasonRun;
     void begin(lastConfig).then(() => {
       careerRun = wasCareer;
+      seasonRun = wasSeason;
     });
   },
   quit() {
     careerRun = false;
+    seasonRun = false;
     void goToMenu();
   },
   leaveRoom() {
