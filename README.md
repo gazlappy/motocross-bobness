@@ -80,3 +80,11 @@ Ground: retro by default (the original flat-coloured look); switch to realistic 
 Stack: TypeScript, Vite, Three.js, Rapier (WASM physics).
 
 Models: free CC-BY models from Sketchfab (see [CREDITS.md](CREDITS.md)), in `assets/models/`. The bike is the rigged Honda CRF 450 (steering, fork, swingarm and wheels driven by the physics; its red plastics are recoloured to match each rider's kit); **Options > Bike model** switches back to the original low-detail bike, which has 7 colour variants built in. The rider is our own low-poly model (Blender, rigged with Mixamo); the physics poses its Mixamo skeleton each frame, and the ragdoll drives it in crashes. `node scripts/inspect-glb.ts <file.glb>` prints a model's parts and skeleton.
+
+## Added since (from the original's disc and manual)
+- **1998 Season** (main menu): fifteen supercross rounds, San Diego to Dallas, points and standings, saved.
+- **Track Editor** (main menu): build supercross tracks from the original's piece types on a 14 x 7 grid; save, ride or race them. Supercross events pick any track and stadium (square day/night, dome, pyramid, excavation).
+- **Replays** (results or pause: *Watch replay*; Space, Left/Right, C, N, Esc) and **track records** per track.
+- **Cameras**: the original's eight (Chase, Slot, Sky, Rider, User, Bird's-Eye, Thrill, Reverse); numeric keypad adjusts. **PageUp/PageDown** watch other riders.
+- **Hot keys**: F5 stats, F6 cues, F7 speedo, F8 scenery, F9 dust, F10 shadows, F11/F12 quality, B rider names.
+- **Garage** (Options): three engine curves, springs, damping, traction. **Handling**: classic or realistic. 450cc bike. All 16 original stunts plus the Big Kahuna Dumpster (Enter) and taunt (T).
