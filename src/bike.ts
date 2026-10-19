@@ -55,8 +55,11 @@ const SLIDE_KD = 9;
 const DRAG_CDA = 0.42;
 /** Classic: sideways grip, far beyond the tyres' along-the-wheel grip, as in the original (its static
  * friction was 6). The bike turns on its bars, not its lean, and the lean is held for show. */
-const CORNER_MU = 1.9;
-const EASY_CORNER_MU = 1.6;
+const CORNER_MU = 2.1;
+const EASY_CORNER_MU = 1.8;
+/** Classic: how firmly the rider keeps the rear wheel in line behind the front. */
+const CLASSIC_TRACK_KP = 40;
+const CLASSIC_TRACK_KD = 6;
 /** Classic: extra rear grip on steep climbs (as a share of normal grip), from and to these slopes (sin). */
 const CLIMB_GRIP = 0.9;
 const CLIMB_GRIP_FROM = Math.sin(0.35);
@@ -504,7 +507,7 @@ export class Bike {
       // Rear brake hard enough to lock the wheel: it slides, dragging with sliding friction and keeping
       // only a little sideways grip, so the back end steps out of the turn (turning right, it kicks
       // out left). Grip returns as the slide gets big: a lot in Easy, a little otherwise.
-      const locked = !w.steered && this.canLockRear && c.brake > REAR_LOCK && Math.abs(vLong) > 1.5;
+      const locked = !w.steered && this.realistic && this.canLockRear && c.brake > REAR_LOCK && Math.abs(vLong) > 1.5;
       if (!w.steered) this.rearLocked = locked;
       if (locked) {
         // A sliding tyre drags against its whole motion, sideways included: the rear drifts out until
@@ -761,6 +764,11 @@ export class Bike {
         const rate = (this.tailOut - this.tailOutPrev) / dt;
         const held = THREE.MathUtils.smoothstep(Math.abs(this.tailOut), 0.05, 0.2);
         torque.addScaledVector(_up, -INERTIA.y * (SLIDE_KP * over + 4 * held * rate));
+      }
+      // Classic: the back end tracks the front, as in the original (no sliding round).
+      if (!this.realistic && Math.abs(this.speed) > 2 && this.wheels[0].grounded && this.wheels[1].grounded) {
+        const rate = (this.tailOut - this.tailOutPrev) / dt;
+        torque.addScaledVector(_up, -INERTIA.y * (CLASSIC_TRACK_KP * this.tailOut + CLASSIC_TRACK_KD * rate));
       }
       this.tailOutPrev = this.tailOut;
       // Easy: at walking pace (stalled on a face, rolling back) the rider dabs a foot and holds it up.

@@ -1,5 +1,6 @@
-// Brake hard mid-turn: the rear should lock and step out of the turn (turning right, the back end
-// kicks out left) without throwing the rider; a gentle brake shouldn't slide at all. Flat ground.
+// Realistic handling: brake hard mid-turn and the rear should lock and step out of the turn (turning right, the back end
+// kicks out left) without throwing the rider; a gentle brake shouldn't slide at all. Classic
+// (the original's way) never slides round: the back end stays in line. Flat ground.
 // Usage: node scripts/brake-slide-test.ts
 import RAPIER from '@dimforge/rapier3d-compat';
 import * as THREE from 'three';
@@ -25,12 +26,13 @@ function noseVsTravel(bike: Bike) {
   return THREE.MathUtils.radToDeg(Math.atan2(vel.x * f.z - vel.z * f.x, vel.dot(f)));
 }
 
-function run(assist: boolean, brake: number, steer: number) {
+function run(assist: boolean, brake: number, steer: number, realistic = true) {
   const world = new RAPIER.World({ x: 0, y: -9.81, z: 0 });
   world.timestep = DT;
   world.createCollider(RAPIER.ColliderDesc.heightfield(4, 4, new Float32Array(25), { x: 2000, y: 1, z: 2000 }));
   const bike = new Bike(world, new THREE.Vector3(0, 1, 600), 0);
   bike.assist = assist;
+  bike.realistic = realistic;
   const idle: Controls = { throttle: 0, brake: 0, steer: 0, leanForward: 0, leanSide: 0 };
   for (let i = 0; i < 60; i++) { bike.step(idle, DT); world.step(); }
   bike.body.setLinvel({ x: 0, y: 0, z: -15 }, true);
@@ -66,6 +68,8 @@ for (const assist of [false, true]) {
   check(hard.maxOut < 60, `${name}: the slide is held, not a spin (${hard.maxOut.toFixed(1)} deg)`);
   const soft = run(assist, 0.5, 0.6);
   check(soft.lockedFor === 0 && soft.maxOut < 4, `${name}: a gentle brake doesn't slide (swing ${soft.maxOut.toFixed(1)} deg)`);
+  const classic = run(assist, 1, 0.6, false);
+  check(classic.lockedFor === 0 && classic.maxOut < 8 && !classic.crashed, `Classic ${name}: a hard brake mid-turn stays in line (swing ${classic.maxOut.toFixed(1)} deg)`);
 }
 
 console.log(failed ? `\n${failed} brake check(s) FAILED` : '\nAll brake checks passed.');
