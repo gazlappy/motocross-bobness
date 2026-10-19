@@ -71,7 +71,7 @@ export class Input {
   /** Read the current control state. `dt` smooths digital steering so keyboard play isn't twitchy. */
   read(dt: number): Controls {
     const keySteer = this.down('steerRight') - this.down('steerLeft');
-    const rate = keySteer === 0 ? 6 : 3.5;
+    const rate = keySteer === 0 ? 8 : 6;
     this.steerSmooth += Math.max(-rate * dt, Math.min(rate * dt, keySteer - this.steerSmooth));
 
     const c: Controls = {

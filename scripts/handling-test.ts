@@ -109,8 +109,7 @@ for (const realistic of [false, true]) {
   }
 }
 
-// The garage: every engine pulls and they differ; soft springs sag more; more traction holds a
-// harder turn before sliding.
+// The garage: every engine pulls and they differ; soft springs sag more; more traction turns tighter.
 {
   const launch = (tuning: Partial<Tuning>) => {
     const { bike, run } = setup(false, false, 0);
@@ -131,14 +130,13 @@ for (const realistic of [false, true]) {
   };
   check(sag(-2) > sag(2) + 0.01, `soft front springs sag more (${(sag(-2) * 100).toFixed(1)} vs ${(sag(2) * 100).toFixed(1)} cm)`);
 
-  const slip = (traction: number) => {
+  const turnRate = (traction: number) => {
     const { bike, run, hold } = setup(false, false, 12);
     bike.setTuning({ ...DEFAULT_TUNING, traction });
-    let most = 0;
-    run(2, (b) => ({ ...idle, steer: 1, throttle: hold(12)(b) }), (b) => (most = Math.max(most, b.wheels[1].slip)));
-    return most;
+    run(2, (b) => ({ ...idle, steer: 1, throttle: hold(12)(b) }));
+    return Math.abs(bike.body.angvel().y);
   };
-  check(slip(2) < slip(-2), `more traction, less sliding in a hard turn (${slip(2).toFixed(2)} vs ${slip(-2).toFixed(2)})`);
+  check(turnRate(2) > turnRate(-2) * 1.05, `more traction turns tighter (${turnRate(2).toFixed(2)} vs ${turnRate(-2).toFixed(2)} rad/s)`);
 }
 
 console.log(failed ? `\n${failed} handling check(s) FAILED` : '\nAll handling checks passed.');

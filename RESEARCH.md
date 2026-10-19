@@ -273,6 +273,7 @@ which look like misprints for back+right and back+left):
 | Top speed | capped at 109 mph (drag is tiny) | 85 mph (drag-limited) |
 | Lean | max 40°, 120°/s | ~47°, 143°/s |
 | Steering lock | 36° | 35.5° |
+| Cornering | sideways (static) friction 6.0, sliding 0.15: the bike turns on its bars, lean is mostly for show | classic: sideways grip 1.9 (Easy 1.6) on top of the lean, ~1.35 g turns; realistic: lean-limited, ~0.65 g |
 | Suspension | front 0.30 m travel, 14.6 kN/m + cubic; rear 0.21 m, 8.8 kN/m + cubic; garage sliders ±10-20% | 0.42 m both, 6.2 kN/m + progressive bump stop |
 | Brakes | 778 N total (≈ 0.43 g) | 1,700 N front + 850 N rear |
 | Traction | slider 0.85-1.0 (default 0.95); full grip only above 13.7 m/s | μ 1.15 (classic) / 0.95 (realistic) |

@@ -61,7 +61,7 @@ function ride(easy: boolean, keyboard: boolean, slot: number, deadband: number) 
     // Keyboard: steering keys are on or off (smoothed the way the game smooths them), gas held
     // everywhere, brake key slammed for corners.
     const wantSteer = keyboard ? (Math.abs(angle) > deadband ? Math.sign(angle) : 0) : THREE.MathUtils.clamp(angle * (1 + deadband * 8), -1, 1);
-    const rate = wantSteer === 0 ? 6 : 3.5;
+    const rate = wantSteer === 0 ? 8 : 6;
     steerKey += THREE.MathUtils.clamp(wantSteer - steerKey, -rate * DT, rate * DT);
     const braking = b.speed > target + 1.5;
     const c: Controls = {

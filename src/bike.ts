@@ -53,6 +53,10 @@ const EASY_SLIDE = 0.35;
 const SLIDE_KP = 30;
 const SLIDE_KD = 9;
 const DRAG_CDA = 0.42;
+/** Classic: sideways grip, far beyond the tyres' along-the-wheel grip, as in the original (its static
+ * friction was 6). The bike turns on its bars, not its lean, and the lean is held for show. */
+const CORNER_MU = 1.9;
+const EASY_CORNER_MU = 1.6;
 /** Classic: extra rear grip on steep climbs (as a share of normal grip), from and to these slopes (sin). */
 const CLIMB_GRIP = 0.9;
 const CLIMB_GRIP_FROM = Math.sin(0.35);
@@ -204,6 +208,9 @@ export class Bike {
   private shiftCooldown = 0;
   private leanTarget = 0;
   private requestedSteer = 0;
+  /** This step's lean and sideways acceleration in the turn (classic grip beyond the lean's share). */
+  private cornerRoll = 0;
+  private cornerAccel = 0;
   private upsideDownTime = 0;
   private probe = new RAPIER.Ball(PROBE_RADIUS);
   private world: RAPIER.World;
@@ -344,7 +351,7 @@ export class Bike {
     const absSpeed = Math.abs(this.speed);
 
     // Steering lock narrows with speed so the turn never asks for more grip than the tyres have.
-    const mu = (this.realistic ? REAL_MU : TYRE_MU) * this.tune.grip;
+    const mu = (this.realistic ? REAL_MU : this.assist ? EASY_CORNER_MU : CORNER_MU) * this.tune.grip;
     const gripLimited = Math.atan((0.85 * mu * GRAVITY * WHEELBASE) / Math.max(1, absSpeed * absSpeed));
     const maxSteer = Math.min(0.62, gripLimited);
     this.requestedSteer = c.steer * maxSteer;
@@ -356,8 +363,10 @@ export class Bike {
     // Above walking pace a bike turns because it leans: steer the front wheel to the angle the current
     // lean can hold, and let the steering input set the lean (see applyBalance). At a crawl, steer directly.
     const curRoll = -Math.asin(THREE.MathUtils.clamp(_right.y, -1, 1));
+    this.cornerRoll = curRoll;
+    this.cornerAccel = Math.abs(this.speed * _angv.dot(_up));
     const leanSteer = Math.atan((GRAVITY * WHEELBASE * Math.tan(curRoll)) / Math.max(1, absSpeed * absSpeed));
-    const byLean = THREE.MathUtils.smoothstep(absSpeed, 3, 8);
+    const byLean = this.realistic ? THREE.MathUtils.smoothstep(absSpeed, 3, 8) : 0;
     this.steerAngle = THREE.MathUtils.clamp(
       THREE.MathUtils.lerp(this.requestedSteer, leanSteer * Math.sign(this.speed || 1), byLean),
       -maxSteer, maxSteer,
@@ -542,11 +551,13 @@ export class Bike {
       } else {
         // Easy: ABS and traction control in one. Cornering grip comes first; brakes and drive only get
         // what's left of the tyre, kept just short of sliding.
+        // A friction ellipse: the full along-the-wheel grip, and far more sideways.
+        const side = this.rearLocked ? 1 : (this.assist ? EASY_CORNER_MU : CORNER_MU) / TYRE_MU;
         if (this.assist) {
-          const budget = Math.sqrt(Math.max(0, (0.92 * maxJ) ** 2 - jLat * jLat));
+          const budget = Math.sqrt(Math.max(0, (0.92 * maxJ) ** 2 - (jLat / side) ** 2));
           if (Math.abs(jLong) > budget) jLong = Math.sign(jLong) * budget;
         }
-        const mag = Math.hypot(jLong, jLat);
+        const mag = Math.hypot(jLong, jLat / side);
         w.slip = maxJ > 0 ? Math.min(1, mag / maxJ) : 1;
         if (mag > maxJ && mag > 0) {
           jLong *= maxJ / mag;
@@ -560,6 +571,15 @@ export class Bike {
         const inLine = _p.copy(contact).addScaledVector(_lat, -off);
         body.applyImpulseAtPoint(toR(_imp.copy(_wf).multiplyScalar(jLong)), toR(inLine), true);
         body.applyImpulseAtPoint(toR(_imp.copy(_lat).multiplyScalar(jLat)), toR(contact), true);
+      } else if (!this.realistic) {
+        // Classic: the sideways grip beyond what the lean balances acts in line with the centre of mass,
+        // so a hard turn at a modest lean doesn't flip the bike out of it.
+        const need = this.cornerAccel;
+        const held = need > 0.5 ? THREE.MathUtils.clamp(1 - (GRAVITY * Math.tan(Math.abs(this.cornerRoll))) / need, 0, 1) : 0;
+        const height = _v.subVectors(_com, contact).dot(w.surfaceNormal);
+        _side.copy(contact).addScaledVector(w.surfaceNormal, held * height);
+        body.applyImpulseAtPoint(toR(_imp.copy(_wf).multiplyScalar(jLong)), toR(contact), true);
+        body.applyImpulseAtPoint(toR(_imp.copy(_lat).multiplyScalar(jLat)), toR(_side), true);
       } else {
         _imp.copy(_wf).multiplyScalar(jLong).addScaledVector(_lat, jLat);
         body.applyImpulseAtPoint(toR(_imp), toR(contact), true);

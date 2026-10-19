@@ -105,7 +105,7 @@ export class AIDriver implements Driver {
     const local = _f.set(tx - t.x, 0, tz - t.z).applyQuaternion(_q);
     const angle = Math.atan2(local.x, -local.z); // + = target is to the right
     // Gentle gain: steering sets the lean, which takes a moment to build, so eager steering weaves.
-    c.steer = bike.grounded ? THREE.MathUtils.clamp(angle * (onJump ? 0.8 : 1.4), -1, 1) : 0;
+    c.steer = bike.grounded ? THREE.MathUtils.clamp(angle * (onJump ? 0.8 : 2.0), -1, 1) : 0;
 
     // Fastest speed from which every corner in view can still be made with steady braking.
     let target = TOP_SPEED * this.skill;
@@ -119,6 +119,8 @@ export class AIDriver implements Driver {
     // Hit each jump at the speed it's built for (overshooting a landing is as bad as casing it).
     for (const j of this.track.jumps) {
       const d = (((j.at - this.s) % L) + L) % L;
+      // Already on its face: hold its speed to the lip.
+      if (L - d < j.up) target = Math.min(target, j.speed + 1.5);
       if (d > LOOK_SPEED) continue;
       // Slow, technical sections (supercross rhythms, whoops): be at speed before committing at
       // the first jump, then let each next jump set the pace.

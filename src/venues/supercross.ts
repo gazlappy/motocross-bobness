@@ -29,8 +29,8 @@ const jumps: Jump[] = [
   ...Array.from({ length: 8 }, (_, i) => ({ at: 308 + i * 5, up: 2.5, rise: 0.3, top: 0, down: 2.5, speed: 8 })),
   { at: 362, up: 6, rise: 2.6, top: 8, down: 7, speed: 12 },
   // A pair of rollers on the return lane.
-  { at: 428, up: 3, rise: 0.9, top: 0, down: 3, speed: 10 },
-  { at: 440, up: 3, rise: 0.9, top: 0, down: 3, speed: 10 },
+  { at: 428, up: 3, rise: 0.6, top: 0, down: 3, speed: 10 },
+  { at: 440, up: 3, rise: 0.6, top: 0, down: 3, speed: 10 },
 ];
 
 export const SUPERCROSS: TrackDef = {
