@@ -17,6 +17,8 @@ import { type StuntDir, activePad } from './input.ts';
 import { STUNT_LIST } from './stunts.ts';
 import { recordsFor } from './records.ts';
 import { trackChoices, trackFor } from './sxLibrary.ts';
+import { TrackEditor } from './editor.ts';
+import type { SxTrack } from './sxTrack.ts';
 import { STADIUMS, type StadiumId } from './venues/supercross.ts';
 import { CAMERA_MODES, CAMERA_NAMES } from './camera.ts';
 import { DEFAULT_TUNING, ENGINES, type EngineChoice, type Tuning, torqueCurve } from './tuning.ts';
@@ -40,7 +42,7 @@ export interface MenuHandlers {
   replay(): void;
 }
 
-type Screen = 'main' | 'select' | 'options' | 'credits' | 'pause' | 'results' | 'career' | 'garage' | 'tuning' | 'multiplayer' | 'lobby' | 'controls';
+type Screen = 'main' | 'select' | 'options' | 'credits' | 'pause' | 'results' | 'career' | 'garage' | 'tuning' | 'multiplayer' | 'lobby' | 'controls' | 'editor';
 
 interface Mode {
   id: string;
@@ -222,6 +224,7 @@ export class Menu {
     else if (s === 'controls') this.renderControls();
     else if (s === 'garage') this.renderGarage();
     else if (s === 'tuning') this.renderTuning();
+    else if (s === 'editor') this.renderEditor();
     this.focusables()[0]?.focus();
   }
 
@@ -241,6 +244,7 @@ export class Menu {
     this.button('Career', () => this.open('career'));
     this.button('Single Event', () => this.open('select'));
     this.button('Multiplayer', () => this.open(this.lobby.room ? 'lobby' : 'multiplayer'));
+    this.button('Track Editor', () => this.open('editor'));
     this.button('Options', () => this.open('options'));
     this.button('Credits', () => this.open('credits'));
     this.panel.append(el('p', 'menu-foot', 'A tribute to Motocross Madness (1998).<br>Arrows + Enter, or the mouse.'));
@@ -559,6 +563,21 @@ export class Menu {
   }
 
   /** The original's garage: engine curve, springs and damping front and rear, and traction. */
+  private editor = new TrackEditor();
+
+  /** The supercross track editor; riding or racing a track starts a game on it. */
+  private renderEditor() {
+    const st = this.settings;
+    const play = (mode: 'freeride' | 'race') => (track: SxTrack) => {
+      this.hide();
+      this.h.start({
+        mode, venue: 'supercross', laps: st.laps, opponents: mode === 'race' ? st.opponents : 0, difficulty: st.difficulty,
+        colour: st.colour, duration: st.duration, bike: st.bike, sx: { track, stadium: st.sxStadium },
+      });
+    };
+    this.editor.render(this.panel, { ride: play('freeride'), race: play('race'), back: () => this.back() });
+  }
+
   private renderTuning() {
     this.title('Garage');
     const t = this.settings.tuning;
