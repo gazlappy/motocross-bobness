@@ -584,6 +584,18 @@ addEventListener('keydown', (e) => {
     saveSettings(settings);
     applySettings(settings);
     flashBanner(`GRAPHICS<small>${settings.resolution * 100}% resolution</small>`, 900);
+  } else if (e.code.startsWith('Numpad') && rig) {
+    // The original's camera keys: +/- distance, 4/6 orbit, 8/2 height, 5 next view, 0 Bird's-Eye.
+    const u = rig.user;
+    if (e.code === 'NumpadAdd') u.zoom = Math.max(0.5, u.zoom - 0.1);
+    else if (e.code === 'NumpadSubtract') u.zoom = Math.min(2.5, u.zoom + 0.1);
+    else if (e.code === 'Numpad4') u.orbit += 0.15;
+    else if (e.code === 'Numpad6') u.orbit -= 0.15;
+    else if (e.code === 'Numpad8') u.raise = Math.min(8, u.raise + 0.4);
+    else if (e.code === 'Numpad2') u.raise = Math.max(-1.5, u.raise - 0.4);
+    else if (e.code === 'Numpad5') rig.cycle();
+    else if (e.code === 'Numpad0') rig.setMode('birdseye');
+    else return;
   } else if ((e.code === 'PageUp' || e.code === 'PageDown') && session && !menu.visible && !replay) {
     const n = session.entries.length;
     const from = watching ?? session.entries.indexOf(session.star);
