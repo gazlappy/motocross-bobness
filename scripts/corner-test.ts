@@ -32,7 +32,7 @@ function corner(speed: number) {
   }
   bike.body.setLinvel({ x: 0, y: 0, z: -speed }, true);
   bike.rider.snapTo(bike.body);
-  let turned = 0, prev = heading(bike), t90 = 0;
+  let turned = 0, prev = heading(bike), t90 = 0, swing = 0;
   for (let i = 1; i <= 4 / DT; i++) {
     bike.step({ ...idle, steer: Math.min(1, i * DT * 6), throttle: gas ? 1 : Math.max(0, Math.min(1, (speed - bike.speed) * 0.5)) }, DT);
     world.step();
@@ -40,10 +40,11 @@ function corner(speed: number) {
     turned += Math.abs(Math.atan2(Math.sin(h - prev), Math.cos(h - prev)));
     prev = h;
     if (!t90 && turned >= Math.PI / 2) t90 = i * DT;
+    swing = Math.max(swing, Math.abs(bike.tailOut));
     if (bike.crashCause) break;
   }
   const g = Math.abs(bike.speed * bike.body.angvel().y) / 9.81;
-  return { t90, g, speed: bike.speed, crash: bike.crashCause };
+  return { t90, g, speed: bike.speed, swing: THREE.MathUtils.radToDeg(swing), crash: bike.crashCause };
 }
 
 /** A keyboard hairpin: brake key and steer key together, then gas, until the nose has turned 180. */
@@ -82,7 +83,7 @@ function hairpin(speed: number, brakeFor: number) {
 
 for (const mph of [10, 20, 30, 40, 50]) {
   const r = corner(mph / 2.237);
-  console.log(`${mph} mph: 90 deg in ${r.t90.toFixed(2)} s, ${r.g.toFixed(2)} g, ends at ${(r.speed * 2.237).toFixed(0)} mph${r.crash ? `, crashed: ${r.crash}` : ''}`);
+  console.log(`${mph} mph: 90 deg in ${r.t90.toFixed(2)} s, ${r.g.toFixed(2)} g, ends at ${(r.speed * 2.237).toFixed(0)} mph, rear slides ${r.swing.toFixed(0)} deg at most${r.crash ? `, crashed: ${r.crash}` : ''}`);
 }
 for (const [speed, brakeFor] of [[12, 0.6], [16, 0.9], [20, 1.2]]) {
   const r = hairpin(speed, brakeFor);

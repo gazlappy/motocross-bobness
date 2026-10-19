@@ -53,10 +53,22 @@ const EASY_SLIDE = 0.35;
 const SLIDE_KP = 30;
 const SLIDE_KD = 9;
 const DRAG_CDA = 0.42;
-/** Classic: sideways grip, far beyond the tyres' along-the-wheel grip, as in the original (its static
- * friction was 6). The bike turns on its bars, not its lean, and the lean is held for show. */
-const CORNER_MU = 2.1;
-const EASY_CORNER_MU = 1.8;
+/** Classic, as in the original: the tyres grip far harder sideways than along the wheel, the front much
+ * harder than the rear (the original's front 6.0, rear 0.6), so the bike turns on its bars and the back
+ * end can come round. Easy keeps the rear closer to the front. */
+const FRONT_SIDE_MU = 3.2;
+const REAR_SIDE_MU = 2.4;
+const EASY_FRONT_SIDE_MU = 2.9;
+const EASY_REAR_SIDE_MU = 2.4;
+/** Classic: full lock, the original's 36 degrees times its default steering sensitivity (0.8). */
+const CLASSIC_LOCK = THREE.MathUtils.degToRad(29);
+/** Classic: a steady turn at full lock asks the rear for this share of its sideways grip (the rest is for drive). */
+const CLASSIC_TURN_SHARE = 0.75;
+/** Classic: the original sets the lean directly, steer x 0.05 x speed in ft/s (radians), at least 5 degrees. */
+const CLASSIC_LEAN_PER_FTS = 0.05;
+const CLASSIC_MIN_LEAN = THREE.MathUtils.degToRad(5);
+/** ...but only on its wheels: pitched further than this from the ground (sine), it's left to fall. */
+const CLASSIC_LEAN_MAX_PITCH = Math.sin(0.6);
 /** Classic: how far the back end can step out (radians) before the rider stops it, and how firmly. */
 const TAIL_FREE = 0.4;
 const CLASSIC_TRACK_KP = 40;
@@ -192,7 +204,8 @@ export class Bike {
    */
   realistic = false;
   /** Realistic: how far the back end is out (radians, + = tail out to the right) and how long the front has slid. */
-  private tailOut = 0;
+  /** How far the rear tyre is sliding sideways (radians, + = back end out to the left). */
+  tailOut = 0;
   private tailOutPrev = 0;
   private frontWash = 0;
   /** Garage settings: engine curve, springs, damping, traction (see tuning.ts). */
@@ -212,9 +225,8 @@ export class Bike {
   private shiftCooldown = 0;
   private leanTarget = 0;
   private requestedSteer = 0;
-  /** This step's lean and sideways acceleration in the turn (classic grip beyond the lean's share). */
-  private cornerRoll = 0;
-  private cornerAccel = 0;
+  /** The steering asked for this step, as a share of the lock (classic sets the lean from it). */
+  private steerShare = 0;
   private upsideDownTime = 0;
   private probe = new RAPIER.Ball(PROBE_RADIUS);
   private world: RAPIER.World;
@@ -355,20 +367,19 @@ export class Bike {
     const absSpeed = Math.abs(this.speed);
 
     // Steering lock narrows with speed so the turn never asks for more grip than the tyres have.
-    const mu = (this.realistic ? REAL_MU : this.assist ? EASY_CORNER_MU : CORNER_MU) * this.tune.grip;
-    const gripLimited = Math.atan((0.85 * mu * GRAVITY * WHEELBASE) / Math.max(1, absSpeed * absSpeed));
-    const maxSteer = Math.min(0.62, gripLimited);
+    const mu = (this.realistic ? REAL_MU : this.sideMu(false)) * this.tune.grip;
+    const gripLimited = Math.atan(((this.realistic ? 0.85 : CLASSIC_TURN_SHARE) * mu * GRAVITY * WHEELBASE) / Math.max(1, absSpeed * absSpeed));
+    const maxSteer = Math.min(this.realistic ? 0.62 : CLASSIC_LOCK, gripLimited);
     this.requestedSteer = c.steer * maxSteer;
     // Easy: straighten up on a steep climb (a jump face), as a rider would before taking off.
     if (this.assist && this.grounded) {
       const climb = Math.asin(THREE.MathUtils.clamp(_fwd.y, -1, 1));
       this.requestedSteer *= 1 - 0.85 * THREE.MathUtils.smoothstep(climb, 0.12, 0.3);
     }
+    this.steerShare = maxSteer > 0 ? this.requestedSteer / maxSteer : 0;
     // Above walking pace a bike turns because it leans: steer the front wheel to the angle the current
     // lean can hold, and let the steering input set the lean (see applyBalance). At a crawl, steer directly.
     const curRoll = -Math.asin(THREE.MathUtils.clamp(_right.y, -1, 1));
-    this.cornerRoll = curRoll;
-    this.cornerAccel = Math.abs(this.speed * _angv.dot(_up));
     const leanSteer = Math.atan((GRAVITY * WHEELBASE * Math.tan(curRoll)) / Math.max(1, absSpeed * absSpeed));
     const byLean = this.realistic ? THREE.MathUtils.smoothstep(absSpeed, 3, 8) : 0;
     this.steerAngle = THREE.MathUtils.clamp(
@@ -556,7 +567,7 @@ export class Bike {
         // Easy: ABS and traction control in one. Cornering grip comes first; brakes and drive only get
         // what's left of the tyre, kept just short of sliding.
         // A friction ellipse: the full along-the-wheel grip, and far more sideways.
-        const side = this.rearLocked ? 1 : (this.assist ? EASY_CORNER_MU : CORNER_MU) / TYRE_MU;
+        const side = this.rearLocked ? 1 : this.sideMu(w.steered) / TYRE_MU;
         if (this.assist) {
           const budget = Math.sqrt(Math.max(0, (0.92 * maxJ) ** 2 - (jLat / side) ** 2));
           if (Math.abs(jLong) > budget) jLong = Math.sign(jLong) * budget;
@@ -575,15 +586,6 @@ export class Bike {
         const inLine = _p.copy(contact).addScaledVector(_lat, -off);
         body.applyImpulseAtPoint(toR(_imp.copy(_wf).multiplyScalar(jLong)), toR(inLine), true);
         body.applyImpulseAtPoint(toR(_imp.copy(_lat).multiplyScalar(jLat)), toR(contact), true);
-      } else if (!this.realistic) {
-        // Classic: the sideways grip beyond what the lean balances acts in line with the centre of mass,
-        // so a hard turn at a modest lean doesn't flip the bike out of it.
-        const need = this.cornerAccel;
-        const held = need > 0.5 ? THREE.MathUtils.clamp(1 - (GRAVITY * Math.tan(Math.abs(this.cornerRoll))) / need, 0, 1) : 0;
-        const height = _v.subVectors(_com, contact).dot(w.surfaceNormal);
-        _side.copy(contact).addScaledVector(w.surfaceNormal, held * height);
-        body.applyImpulseAtPoint(toR(_imp.copy(_wf).multiplyScalar(jLong)), toR(contact), true);
-        body.applyImpulseAtPoint(toR(_imp.copy(_lat).multiplyScalar(jLat)), toR(_side), true);
       } else {
         _imp.copy(_wf).multiplyScalar(jLong).addScaledVector(_lat, jLat);
         body.applyImpulseAtPoint(toR(_imp), toR(contact), true);
@@ -742,7 +744,7 @@ export class Bike {
       const rate = this.realistic ? REAL_LEAN_RATE / (1 + Math.abs(this.speed) / 20) : LEAN_RATE;
       this.leanTarget += THREE.MathUtils.clamp(desired - this.leanTarget, -rate * dt, rate * dt);
       const target = this.leanTarget;
-      torque.addScaledVector(_fwd, INERTIA.z * (LEAN_KP * (target - roll) - LEAN_KD * rollRate));
+      if (this.realistic) torque.addScaledVector(_fwd, INERTIA.z * (LEAN_KP * (target - roll) - LEAN_KD * rollRate));
       // Rear locked: the rider holds the slide, the back end out of the turn by a set angle (turning
       // right, it kicks out left), rather than letting it spin or snap back.
       if (this.rearLocked && Math.abs(this.speed) > 2) {
@@ -774,13 +776,13 @@ export class Bike {
       }
       this.tailOutPrev = this.tailOut;
       // Easy: at walking pace (stalled on a face, rolling back) the rider dabs a foot and holds it up.
-      if (this.assist) {
+      if (this.assist && this.realistic) {
         const slow = 1 - THREE.MathUtils.smoothstep(Math.abs(this.speed), 1.5, 4);
         if (slow > 0) torque.addScaledVector(_fwd, -INERTIA.z * slow * (60 * roll + 10 * rollRate));
       }
       // A firm stop past the tyres' limit: the rider won't let it fold over.
-      const over = Math.abs(roll) - tyreLean - (this.realistic ? 0.12 : 0.05);
-      if (over > 0) torque.addScaledVector(_fwd, -Math.sign(roll) * INERTIA.z * 400 * over);
+      const over = Math.abs(roll) - tyreLean - 0.12;
+      if (this.realistic && over > 0) torque.addScaledVector(_fwd, -Math.sign(roll) * INERTIA.z * 400 * over);
       // Wheelie control: past a point the rider pulls the nose back down, unless leaning back for it.
       const nose = this.wheelieAngle;
       const limit = this.assist ? 0.08 : 0.12 + 0.32 * Math.max(0, -this.lean.y) - 0.06 * Math.max(0, this.lean.y);
@@ -829,5 +831,40 @@ export class Bike {
     torque.multiplyScalar(dt * 0.5);
     body.applyTorqueImpulse(toR(torque), true);
     this.rider.body.applyTorqueImpulse(toR(torque), true);
+    if (this.grounded && !this.realistic && this.onItsWheels()) this.setClassicLean(roll, dt);
+  }
+
+  /** Classic, as in the original: the lean isn't balanced, it's set. Steering asks for a lean that grows
+   * with speed (full lean from about 10 mph), and the bike rolls straight to it at up to 120 degrees/s. */
+  private setClassicLean(roll: number, dt: number) {
+    const body = this.body;
+    const share = this.steerShare;
+    let want = share * CLASSIC_LEAN_PER_FTS * Math.abs(this.speed) * 3.281;
+    if (share !== 0 && Math.abs(want) < CLASSIC_MIN_LEAN * Math.abs(share)) want = CLASSIC_MIN_LEAN * share;
+    const maxLean = this.assist ? MAX_LEAN * EASY_LEAN : MAX_LEAN;
+    want = THREE.MathUtils.clamp(want + this.lean.x * 0.2, -maxLean, maxLean);
+    this.leanTarget = roll + THREE.MathUtils.clamp(want - roll, -LEAN_RATE * dt, LEAN_RATE * dt);
+    const r = body.rotation();
+    _q.set(r.x, r.y, r.z, r.w);
+    _fwd.set(0, 0, -1).applyQuaternion(_q);
+    _qInv.setFromAxisAngle(_fwd, this.leanTarget - roll);
+    _q.premultiply(_qInv);
+    body.setRotation({ x: _q.x, y: _q.y, z: _q.z, w: _q.w }, true);
+    const av = body.angvel();
+    _angv.set(av.x, av.y, av.z);
+    _angv.addScaledVector(_fwd, -_angv.dot(_fwd));
+    body.setAngvel(toR(_angv), true);
+  }
+
+  /** Riding on the ground rather than stood on one wheel (an endo, a big wheelie): nothing holds it up then. */
+  private onItsWheels() {
+    const w = this.wheels[0].grounded ? this.wheels[0] : this.wheels[1];
+    return Math.abs(_fwd.dot(w.surfaceNormal)) < CLASSIC_LEAN_MAX_PITCH;
+  }
+
+  /** Classic sideways grip of the front or rear tyre (as a friction coefficient). */
+  private sideMu(front: boolean) {
+    if (this.assist) return front ? EASY_FRONT_SIDE_MU : EASY_REAR_SIDE_MU;
+    return front ? FRONT_SIDE_MU : REAR_SIDE_MU;
   }
 }

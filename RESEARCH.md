@@ -278,9 +278,9 @@ which look like misprints for back+right and back+left):
 | Engine | 3 curves (the garage's A/B/C): a dev 250, "CR 250", "KX 250"; peak 43-46 hp at 7,250-7,500 rpm, 10,000 rpm redline, 3,000 rpm floor | 38 Nm at 8,500 rpm ≈ 45 hp, 11,500 redline |
 | Gears | 5; auto-shifts at road speeds of 15, 28, 41, 52, 65 mph; 0.05 s per shift; indoor gearing ~17% shorter | 5; shifts on road-speed rpm, 0.25 s |
 | Top speed | capped at 109 mph (drag is tiny) | 85 mph (drag-limited) |
-| Lean | max 40°, 120°/s | ~47°, 143°/s |
+| Lean | max 40°, 120°/s | classic the same; realistic ~47°, 143°/s |
 | Steering lock | 36° × the Options steering-sensitivity slider (0.7-0.9, default 0.8): about 29° | 35.5° |
-| Cornering | tyre friction 6.0 sideways / 0.15 along the wheel at the front, **one tenth (0.6) sideways at the rear** (see below) | classic: sideways grip 2.1 (Easy 1.8) on top of the lean, ~1.5 g turns, back end stopped at 23° out; realistic: lean-limited, ~0.65 g |
+| Cornering | tyre friction 6.0 sideways / 0.15 along the wheel at the front, **one tenth (0.6) sideways at the rear** (see below) | classic, built on the original's model: lean set directly (steer × 0.05 × ft/s, 40° max, 120°/s), 29° lock, sideways grip front 3.2 / rear 2.4 (Easy 2.9 / 2.4), ~1.4 g turns, back end stopped at 23° out; realistic: lean-limited, ~0.65 g |
 | Suspension | front 0.30 m travel, 14.6 kN/m + cubic; rear 0.21 m, 8.8 kN/m + cubic; garage sliders ±10-20% | 0.42 m both, 6.2 kN/m + progressive bump stop |
 | Brakes | 778 N total (≈ 0.43 g) | 1,700 N front + 850 N rear |
 | Traction | slider 0.85-1.0 (default 0.95); full grip only above 13.7 m/s | μ 1.15 (classic) / 0.95 (realistic) |
