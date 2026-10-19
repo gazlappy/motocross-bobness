@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { BIKES, type BikeSpec } from './bikes.ts';
 import RAPIER from '@dimforge/rapier3d-compat';
 import type { Controls } from './input.ts';
+import { DEFAULT_TUNING, type Tuning, torqueCurve, tuningFactors } from './tuning.ts';
 import { GROUP_AI_BIKE, GROUP_BIKE, GROUP_PROBE, GROUP_RAGDOLL, GROUP_WORLD, Rider, groups } from './rider.ts';
 
 // Bike-local axes: forward = -Z, right = +X, up = +Y.
@@ -35,10 +36,12 @@ const DOWN = { x: 0, y: -1, z: 0 };
 const TYRE_CROWN = 0.07; // m, radius of the tyre's cross-section
 const _side = new THREE.Vector3();
 
-const GEARS = [2.9, 2.1, 1.62, 1.3, 1.08];
+// Five gears with a tall top one: the original let the bike run on past 100 mph.
+const GEARS = [2.9, 2.05, 1.55, 1.18, 0.9];
 
-const FRONT_BRAKE = 1700;
-const REAR_BRAKE = 850;
+// Gentler than a real bike's, towards the original's (~0.43 g): about 0.7 g with both.
+const FRONT_BRAKE = 800;
+const REAR_BRAKE = 420;
 /** Brake input that locks the rear wheel (a keyboard's brake key is always full). */
 const REAR_LOCK = 0.75;
 /** A locked tyre: sliding friction along it, and the share of its sideways grip it keeps. */
@@ -49,14 +52,14 @@ const SLIDE_ANGLE = 0.5;
 const EASY_SLIDE = 0.35;
 const SLIDE_KP = 30;
 const SLIDE_KD = 9;
-const DRAG_CDA = 0.55;
+const DRAG_CDA = 0.42;
 /** Classic: extra rear grip on steep climbs (as a share of normal grip), from and to these slopes (sin). */
 const CLIMB_GRIP = 0.9;
 const CLIMB_GRIP_FROM = Math.sin(0.35);
 const CLIMB_GRIP_FULL = Math.sin(0.85);
 const LEAN_KP = 140;
 const LEAN_KD = 35;
-const LEAN_RATE = 2.5; // rad/s
+const LEAN_RATE = THREE.MathUtils.degToRad(120); // the original's roll rate
 
 // Crash thresholds.
 const CRASH_IMPACT = 16; // m/s into the ground: a flat landing from ~13 m (the original was forgiving)
@@ -65,7 +68,7 @@ const CRASH_LOOPED = 1.15; // rad, landing on the rear wheel that far past verti
 const CRASH_LANDING_ROLL = 1.05; // rad, landing leaned over this far
 const CRASH_STRETCH = 0.42; // m, rider ripped off the pegs
 const LANDING_MIN_AIR = 0.3; // s: shorter hops over bumps aren't judged as landings
-const MAX_LEAN = Math.atan(0.95 * TYRE_MU); // steepest lean the tyres can hold
+const MAX_LEAN = THREE.MathUtils.degToRad(40); // the original's limit (the tyres could hold a little more)
 /** Easy controls: how much more a landing or a jolt can take before it's a crash. */
 const EASY_FORGIVENESS = 1.4;
 /** Easy controls: how much harder the rider can be jolted before being thrown off. */
@@ -90,8 +93,7 @@ const SPIN_OUT = 1.25;
 const WASH_OUT_ANGLE = 0.2;
 const WASH_OUT_TIME = 0.5;
 
-function torqueAt(spec: BikeSpec, rpm: number) {
-  const curve = spec.torqueCurve;
+function torqueAt(spec: BikeSpec, curve: [number, number][], rpm: number) {
   for (let i = 1; i < curve.length; i++) {
     const [r1, t1] = curve[i];
     if (rpm <= r1) {
@@ -185,6 +187,9 @@ export class Bike {
   private tailOut = 0;
   private tailOutPrev = 0;
   private frontWash = 0;
+  /** Garage settings: engine curve, springs, damping, traction (see tuning.ts). */
+  private curve: [number, number][];
+  private tune = tuningFactors(DEFAULT_TUNING);
   /** Hard braking locks the rear and slides it (the AI keeps its brakes on the edge instead). */
   canLockRear = true;
   /** The rear wheel is locked and sliding. */
@@ -206,6 +211,7 @@ export class Bike {
   constructor(world: RAPIER.World, position: THREE.Vector3, yaw = 0, spec: BikeSpec = BIKES['250']) {
     this.world = world;
     this.spec = spec;
+    this.curve = spec.torqueCurve;
     this.rpm = spec.idle;
     const rot = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
     const desc = RAPIER.RigidBodyDesc.dynamic()
@@ -255,6 +261,12 @@ export class Bike {
       sliding: false,
     });
     this.wheels = [wheel(-0.82, true), wheel(0.66, false)];
+  }
+
+  /** Set the garage's engine, suspension and tyres. */
+  setTuning(t: Tuning) {
+    this.curve = torqueCurve(this.spec, t.engine);
+    this.tune = tuningFactors(t);
   }
 
   get gearRatio() {
@@ -332,7 +344,7 @@ export class Bike {
     const absSpeed = Math.abs(this.speed);
 
     // Steering lock narrows with speed so the turn never asks for more grip than the tyres have.
-    const mu = this.realistic ? REAL_MU : TYRE_MU;
+    const mu = (this.realistic ? REAL_MU : TYRE_MU) * this.tune.grip;
     const gripLimited = Math.atan((0.85 * mu * GRAVITY * WHEELBASE) / Math.max(1, absSpeed * absSpeed));
     const maxSteer = Math.min(0.62, gripLimited);
     this.requestedSteer = c.steer * maxSteer;
@@ -423,8 +435,9 @@ export class Bike {
       // Progressive bump stop near the end of travel: the extra spring and the hydraulic bottoming
       // damping build in smoothly. A hard edge here jolted bikes on every roller (visible judder).
       const bump = Math.max(0, compression - BUMP_ZONE_START);
-      let springF = SUSP_K * compression + BUMP_K2 * bump * bump;
-      let damp = compVel > 0 ? SUSP_DAMP_COMP : SUSP_DAMP_REBOUND;
+      const tune = this.tune;
+      let springF = SUSP_K * (w.steered ? tune.frontSpring : tune.rearSpring) * compression + BUMP_K2 * bump * bump;
+      let damp = (compVel > 0 ? SUSP_DAMP_COMP : SUSP_DAMP_REBOUND) * (w.steered ? tune.frontDamping : tune.rearDamping);
       damp *= 1 + 2 * THREE.MathUtils.smoothstep(compression, BUMP_ZONE_START, BUMP_ZONE_START + 0.05);
       // Never damp harder than one physics step can resolve, or the damper itself oscillates.
       damp = Math.min(damp, (0.8 * effectiveMass(origin, _up)) / dt);
@@ -473,12 +486,12 @@ export class Bike {
         // Walk the bike backwards when stopped and holding brake.
         if (c.brake > 0.5 && c.throttle === 0 && Math.abs(this.speed) < 0.5) jLong -= 450 * dt;
       }
-      jLong -= Math.sign(vLong) * Math.min(stopJ, 0.02 * load * dt);
+      jLong -= Math.sign(vLong) * Math.min(stopJ, 0.02 * this.tune.rolling * load * dt);
 
       // Classic: on a steep climb the rear knobblies dig in for more drive, so the bowl walls can be
       // ridden up as in the original (a real tyre would spin out on them).
       const climb = !w.steered && !this.realistic ? THREE.MathUtils.smoothstep(_fwd.y, CLIMB_GRIP_FROM, CLIMB_GRIP_FULL) : 0;
-      const maxJ = TYRE_MU * (1 + CLIMB_GRIP * climb) * load * dt;
+      const maxJ = TYRE_MU * this.tune.grip * (1 + CLIMB_GRIP * climb) * load * dt;
       // Rear brake hard enough to lock the wheel: it slides, dragging with sliding friction and keeping
       // only a little sideways grip, so the back end steps out of the turn (turning right, it kicks
       // out left). Grip returns as the slide gets big: a lot in Easy, a little otherwise.
@@ -488,7 +501,7 @@ export class Bike {
         // A sliding tyre drags against its whole motion, sideways included: the rear drifts out until
         // the drag's sideways share holds it on the turn, then holds that angle.
         const vSlide = Math.hypot(vLong, vLat);
-        const drag = Math.min(SLIDE_MU * load * dt, vSlide * mLong * 0.5);
+        const drag = Math.min(SLIDE_MU * this.tune.grip * load * dt, vSlide * mLong * 0.5);
         jLong = (-vLong / vSlide) * drag;
         const slideLat = (-vLat / vSlide) * drag;
         // Grip comes back as the slide gets big: a lot in Easy (it catches itself), a little otherwise.
@@ -504,8 +517,8 @@ export class Bike {
         // Loose dirt: grip holds up to its peak, then the tyre breaks loose and slides on less until
         // the rider asks for well under that again. A spinning rear gives drive first and what's left
         // of its grip sideways, so the back end steps out under power.
-        const peak = REAL_MU * load * dt;
-        const sliding = REAL_SLIDE_MU * load * dt;
+        const peak = REAL_MU * this.tune.grip * load * dt;
+        const sliding = REAL_SLIDE_MU * this.tune.grip * load * dt;
         if (this.assist && Math.sign(jLong) !== Math.sign(vLong)) {
           // Easy: ABS (the brakes stop short of sliding); drive is left alone for power slides.
           const budget = Math.sqrt(Math.max(0, (0.92 * peak) ** 2 - jLat * jLat));
@@ -647,7 +660,7 @@ export class Bike {
     const feather = 1 - 0.9 * THREE.MathUtils.smoothstep(this.wheelieAngle, limit, limit + 0.2);
     // Easy: traction control eases the drive as the rear tyre reaches its grip limit.
     const traction = this.assist ? 1 - 0.5 * THREE.MathUtils.smoothstep(this.wheels[1].slip, 0.85, 1) : 1;
-    const f = (torqueAt(this.spec, this.rpm) * c.throttle * feather * traction * this.gearRatio * 0.9) / WHEEL_RADIUS;
+    const f = (torqueAt(this.spec, this.curve, this.rpm) * c.throttle * feather * traction * this.gearRatio * 0.9) / WHEEL_RADIUS;
     // Ease off near zero speed so the bike creeps rather than lurches when the clutch bites.
     return vLong < -0.5 ? f * 0.3 : f;
   }

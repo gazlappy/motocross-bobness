@@ -5,6 +5,7 @@ import RAPIER from '@dimforge/rapier3d-compat';
 import * as THREE from 'three';
 import { Bike } from '../src/bike.ts';
 import type { Controls } from '../src/input.ts';
+import { DEFAULT_TUNING, type EngineChoice, type Tuning } from '../src/tuning.ts';
 
 await RAPIER.init();
 const DT = 1 / 120;
@@ -106,6 +107,38 @@ for (const realistic of [false, true]) {
       check(out > 6 && !bike.crashCause && upright(bike) > 0.6, `${name}: a hard brake mid-turn slides the back end out and stays up (${out.toFixed(1)} deg, ${bike.crashCause})`);
     }
   }
+}
+
+// The garage: every engine pulls and they differ; soft springs sag more; more traction holds a
+// harder turn before sliding.
+{
+  const launch = (tuning: Partial<Tuning>) => {
+    const { bike, run } = setup(false, false, 0);
+    bike.setTuning({ ...DEFAULT_TUNING, ...tuning });
+    let t = 0;
+    run(8, () => ({ ...idle, throttle: 1 }), (b) => { if (b.speed < 26.8) t += 1 / 120; });
+    return t;
+  };
+  const times = (['stock', 'A', 'B', 'C'] as EngineChoice[]).map((engine) => launch({ engine }));
+  console.log(`0-60 mph by engine (stock, A, B, C): ${times.map((t) => t.toFixed(2)).join(', ')} s`);
+  check(times.every((t) => t > 1 && t < 8) && new Set(times.map((t) => t.toFixed(2))).size > 2, 'every engine pulls, and they differ');
+
+  const sag = (frontSpring: number) => {
+    const { bike, run } = setup(false, false, 0);
+    bike.setTuning({ ...DEFAULT_TUNING, frontSpring });
+    run(1, () => idle);
+    return bike.wheels[0].compression;
+  };
+  check(sag(-2) > sag(2) + 0.01, `soft front springs sag more (${(sag(-2) * 100).toFixed(1)} vs ${(sag(2) * 100).toFixed(1)} cm)`);
+
+  const slip = (traction: number) => {
+    const { bike, run, hold } = setup(false, false, 12);
+    bike.setTuning({ ...DEFAULT_TUNING, traction });
+    let most = 0;
+    run(2, (b) => ({ ...idle, steer: 1, throttle: hold(12)(b) }), (b) => (most = Math.max(most, b.wheels[1].slip)));
+    return most;
+  };
+  check(slip(2) < slip(-2), `more traction, less sliding in a hard turn (${slip(2).toFixed(2)} vs ${slip(-2).toFixed(2)})`);
 }
 
 console.log(failed ? `\n${failed} handling check(s) FAILED` : '\nAll handling checks passed.');

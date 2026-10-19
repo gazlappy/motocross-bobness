@@ -3,7 +3,7 @@ import { KIT_COLOURS, type SessionConfig, rivalsFor } from './session.ts';
 import { type Difficulty, type Settings, saveSettings } from './settings.ts';
 import type { VenueId } from './venue.ts';
 import { ordinal } from './format.ts';
-import { BIKES, BIKE_IDS, type BikeId } from './bikes.ts';
+import { BIKES, BIKE_IDS, type BikeId, type BikeSpec } from './bikes.ts';
 import {
   type Career, SEASON, TIERS, YOU, buyBike, canEnter, currentEvent, money, newCareer, rideBike, saveCareer, standings, startSeason,
 } from './career.ts';
@@ -15,6 +15,7 @@ import {
 } from './bindings.ts';
 import { type StuntDir, activePad } from './input.ts';
 import { STUNT_LIST } from './stunts.ts';
+import { DEFAULT_TUNING, ENGINES, type EngineChoice, type Tuning, torqueCurve } from './tuning.ts';
 
 // The front end: main menu over the attract-mode race, game select, options, credits, pause and
 // results. Plain DOM, driven by mouse, keyboard (arrows, Enter, Esc) or the gamepad's Start.
@@ -33,7 +34,7 @@ export interface MenuHandlers {
   leaveRoom(): void;
 }
 
-type Screen = 'main' | 'select' | 'options' | 'credits' | 'pause' | 'results' | 'career' | 'garage' | 'multiplayer' | 'lobby' | 'controls';
+type Screen = 'main' | 'select' | 'options' | 'credits' | 'pause' | 'results' | 'career' | 'garage' | 'tuning' | 'multiplayer' | 'lobby' | 'controls';
 
 interface Mode {
   id: string;
@@ -209,6 +210,7 @@ export class Menu {
     else if (s === 'lobby') this.renderLobby();
     else if (s === 'controls') this.renderControls();
     else if (s === 'garage') this.renderGarage();
+    else if (s === 'tuning') this.renderTuning();
     this.focusables()[0]?.focus();
   }
 
@@ -332,7 +334,7 @@ export class Menu {
     );
     this.panel.append(list);
     const row = el('div', 'menu-row');
-    for (const [label, fn] of [['Controls', () => this.open('controls')], ['Back', () => this.back()]] as const) {
+    for (const [label, fn] of [['Controls', () => this.open('controls')], ['Garage', () => this.open('tuning')], ['Back', () => this.back()]] as const) {
       const b = el('button', 'menu-btn small', label);
       b.type = 'button';
       b.addEventListener('click', fn);
@@ -526,7 +528,48 @@ export class Menu {
       card.append(action);
       this.panel.append(card);
     }
-    this.button('Back', () => this.back(), 'menu-btn small');
+    const row = el('div', 'menu-row');
+    for (const [label, fn] of [['Tune the bike', () => this.open('tuning')], ['Back', () => this.back()]] as const) {
+      const b = el('button', 'menu-btn small', label);
+      b.type = 'button';
+      b.addEventListener('click', fn);
+      row.append(b);
+    }
+    this.panel.append(row);
+  }
+
+  /** The original's garage: engine curve, springs and damping front and rear, and traction. */
+  private renderTuning() {
+    this.title('Garage');
+    const t = this.settings.tuning;
+    const bike = BIKES[this.stack.includes('career') ? this.career.bike : this.settings.bike];
+    const set = (patch: Partial<Tuning>) => this.set({ tuning: { ...t, ...patch } });
+    const step = (v: number) => ['soft', '-', 'factory', '+', 'stiff'][v + 2];
+    const setup = el('div', 'setup');
+    setup.append(this.segmented<EngineChoice>('Engine', ENGINES.map((e) => e.id), t.engine, (v) => set({ engine: v }),
+      (v) => ENGINES.find((e) => e.id === v)!.name));
+    setup.append(el('p', 'menu-foot controls-blurb', ENGINES.find((e) => e.id === t.engine)!.blurb));
+    setup.append(powerGraph(bike, t.engine));
+    const steps = [-2, -1, 0, 1, 2];
+    setup.append(
+      this.segmented('Front springs', steps, t.frontSpring, (v) => set({ frontSpring: v }), step),
+      this.segmented('Front damping', steps, t.frontDamping, (v) => set({ frontDamping: v }), step),
+      this.segmented('Rear springs', steps, t.rearSpring, (v) => set({ rearSpring: v }), step),
+      this.segmented('Rear damping', steps, t.rearDamping, (v) => set({ rearDamping: v }), step),
+      this.segmented('Traction', steps, t.traction, (v) => set({ traction: v }), (v) => ['hard pack', '-', 'factory', '+', 'soft dirt'][v + 2]),
+    );
+    setup.append(el('p', 'menu-foot controls-blurb',
+      'Soft springs soak up whoops and ruts but bottom out on big landings; stiff ones take the big hits and bounce in the rough. ' +
+      'More damping settles the bike sooner but makes it harsher. More traction grips better but the softer tyres drag a little.'));
+    this.panel.append(setup);
+    const row = el('div', 'menu-row');
+    for (const [label, fn] of [['Factory settings', () => this.set({ tuning: { ...DEFAULT_TUNING } })], ['Back', () => this.back()]] as const) {
+      const b = el('button', 'menu-btn small', label);
+      b.type = 'button';
+      b.addEventListener('click', fn);
+      row.append(b);
+    }
+    this.panel.append(row);
   }
 
 
@@ -922,6 +965,42 @@ export class Menu {
       options[Math.max(0, Math.min(options.length - 1, j + (e.code === 'ArrowRight' ? 1 : -1)))]?.click();
     }
   }
+}
+
+/** Power against revs for a bike with an engine choice, the stock curve faint behind it. */
+function powerGraph(bike: BikeSpec, engine: EngineChoice) {
+  const W = 300, H = 110, top = bike.redline * 1.1;
+  const canvas = el('canvas', 'power-graph') as HTMLCanvasElement;
+  canvas.width = W;
+  canvas.height = H;
+  const g = canvas.getContext('2d')!;
+  const power = (curve: [number, number][], rpm: number) => {
+    for (let i = 1; i < curve.length; i++) {
+      if (rpm <= curve[i][0]) {
+        const [r0, t0] = curve[i - 1], [r1, t1] = curve[i];
+        return (t0 + ((t1 - t0) * (rpm - r0)) / (r1 - r0)) * rpm;
+      }
+    }
+    return 0;
+  };
+  const curves = [torqueCurve(bike, 'stock'), torqueCurve(bike, engine)];
+  let peak = 0;
+  for (const c of curves) for (let r = 0; r <= top; r += 100) peak = Math.max(peak, power(c, r));
+  curves.forEach((c, i) => {
+    g.strokeStyle = i === 0 ? 'rgba(255,255,255,0.25)' : '#ffb020';
+    g.lineWidth = i === 0 ? 1.5 : 2.5;
+    g.beginPath();
+    for (let r = 0; r <= top; r += 100) {
+      const x = (r / top) * (W - 8) + 4, y = H - 16 - (power(c, r) / peak) * (H - 24);
+      if (r === 0) g.moveTo(x, y);
+      else g.lineTo(x, y);
+    }
+    g.stroke();
+  });
+  g.fillStyle = 'rgba(255,255,255,0.6)';
+  g.font = '11px sans-serif';
+  g.fillText(`power vs revs, 0-${Math.round(top / 1000)}k rpm (${bike.name}; faint: stock)`, 4, H - 3);
+  return canvas;
 }
 
 const DIR_ARROW: Record<StuntDir, string> = {

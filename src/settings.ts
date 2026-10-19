@@ -2,6 +2,7 @@ import type { CameraMode } from './camera.ts';
 import type { BikeColour } from './gltfBikeModel.ts';
 import type { VenueId } from './venue.ts';
 import type { BikeId } from './bikes.ts';
+import { DEFAULT_TUNING, type Tuning } from './tuning.ts';
 
 // Player options and the last race setup, kept in the browser between visits. Storage can be
 // unavailable (private windows, blocked site data), so every read and write is best-effort.
@@ -38,6 +39,8 @@ export interface Settings {
   bikeModel: 'crf450' | 'classic';
   /** Retro: the original flat-coloured ground instead of the realistic one. */
   retro: boolean;
+  /** The garage: engine curve, springs, damping and traction. */
+  tuning: Tuning;
   /** Which defaults these settings have seen (see loadSettings). */
   version: number;
 }
@@ -63,6 +66,7 @@ export const DEFAULT_SETTINGS: Settings = {
   handling: 'classic',
   bikeModel: 'crf450',
   retro: true,
+  tuning: { ...DEFAULT_TUNING },
   version: 2,
 };
 

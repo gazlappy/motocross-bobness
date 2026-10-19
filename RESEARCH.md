@@ -263,6 +263,22 @@ which look like misprints for back+right and back+left):
 - `RANDOM*.RSC` files set up a random-waypoint Baja mode (the game picks the route).
 - Wall heights and shapes: still in the compressed terrain tiles.
 
+### The original bike's physics settings (`SBIKE/BIKE2.BIK`, plain text)
+| Setting | Original | Ours (250 two-stroke) |
+|---|---|---|
+| Physics rate | 50 Hz, up to 10 steps per frame | 120 Hz |
+| Weight | bike 109 kg + rider 75 kg | bike 105 kg + rider 75 kg |
+| Engine | 3 curves (the garage's A/B/C): a dev 250, "CR 250", "KX 250"; peak 43-46 hp at 7,250-7,500 rpm, 10,000 rpm redline, 3,000 rpm floor | 38 Nm at 8,500 rpm ≈ 45 hp, 11,500 redline |
+| Gears | 5; auto-shifts at road speeds of 15, 28, 41, 52, 65 mph; 0.05 s per shift; indoor gearing ~17% shorter | 5; shifts on road-speed rpm, 0.25 s |
+| Top speed | capped at 109 mph (drag is tiny) | 85 mph (drag-limited) |
+| Lean | max 40°, 120°/s | ~47°, 143°/s |
+| Steering lock | 36° | 35.5° |
+| Suspension | front 0.30 m travel, 14.6 kN/m + cubic; rear 0.21 m, 8.8 kN/m + cubic; garage sliders ±10-20% | 0.42 m both, 6.2 kN/m + progressive bump stop |
+| Brakes | 778 N total (≈ 0.43 g) | 1,700 N front + 850 N rear |
+| Traction | slider 0.85-1.0 (default 0.95); full grip only above 13.7 m/s | μ 1.15 (classic) / 0.95 (realistic) |
+| Crash limits | lean 70°, pitch 85°, 6 g acceleration / 25 g deceleration | landing-based: 16 m/s impact, nose-down 46°, roll 60° |
+| Wheelies | animation at 0.24 m / 0.55 m front-wheel lift | — |
+
 ## 6. Still to find
 - Terrain heights (the .TRN tile compression), which would give the walls and hills exactly.
 - Supercross track layouts (the track editor's `.TRK`/`.TER` files are uncompressed and look decodable).
