@@ -13,7 +13,7 @@ import type { ResultsTable } from './competition.ts';
 import { BajaRace } from './bajaRace.ts';
 import { Race } from './race.ts';
 import { StuntChallenge } from './stuntChallenge.ts';
-import type { Venue, VenueId } from './venue.ts';
+import type { Venue } from './venue.ts';
 import { buildVenue } from './venues/index.ts';
 import { PoseInterpolator } from './interpolation.ts';
 import { setTerrainStyle } from './terrain.ts';
@@ -94,20 +94,31 @@ const hud = {
 
 // ---- Venues ---------------------------------------------------------------------------------------
 
-const venues = new Map<VenueId, Venue>();
+const venues = new Map<string, Venue>();
 let venue: Venue;
 let rig: CameraRig;
 
 /** Build a venue the first time it's needed (a second or so), behind the loading screen. */
-async function getVenue(id: VenueId) {
-  let v = venues.get(id);
+async function getVenue(config: SessionConfig) {
+  const id = config.venue;
+  // Supercross can be any track in any stadium: one built at a time.
+  const key = id === 'supercross' && config.sx ? `supercross|${config.sx.stadium}|${JSON.stringify(config.sx.track)}` : id;
+  let v = venues.get(key);
   if (!v) {
     hud.loading.textContent = 'Loading…';
     hud.loading.hidden = false;
     await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
-    v = buildVenue(id, world);
+    if (id === 'supercross') {
+      for (const [k, old] of venues) {
+        if (!k.startsWith('supercross|')) continue;
+        scene.remove(old.root);
+        for (const c of old.colliders) world.removeCollider(c, false);
+        venues.delete(k);
+      }
+    }
+    v = buildVenue(id, world, id === 'supercross' && config.sx ? { track: config.sx.track ?? undefined, stadium: config.sx.stadium } : undefined);
     scene.add(v.root);
-    venues.set(id, v);
+    venues.set(key, v);
   }
   hud.loading.hidden = true;
   return v;
@@ -245,7 +256,7 @@ async function begin(config: SessionConfig) {
   Object.assign(stats, { topSpeed: 0, air: 0, longestAir: 0 });
   session?.dispose();
   clearTimeout(resultsTimer);
-  useVenue(await getVenue(config.venue));
+  useVenue(await getVenue(config));
   interp.clear();
   session = new Session(deps, venue, config);
   dirt.clear();
@@ -348,7 +359,7 @@ function attachHud() {
 
 /** Which track records a game counts towards: the venue (and its track, where there's a choice). */
 function recordKey(config: SessionConfig) {
-  return config.venue;
+  return config.sx?.track ? `supercross:${config.sx.track.name}` : config.venue;
 }
 
 /** The records for a track, under the results. */

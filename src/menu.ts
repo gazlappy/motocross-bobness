@@ -16,6 +16,8 @@ import {
 import { type StuntDir, activePad } from './input.ts';
 import { STUNT_LIST } from './stunts.ts';
 import { recordsFor } from './records.ts';
+import { trackChoices, trackFor } from './sxLibrary.ts';
+import { STADIUMS, type StadiumId } from './venues/supercross.ts';
 import { CAMERA_MODES, CAMERA_NAMES } from './camera.ts';
 import { DEFAULT_TUNING, ENGINES, type EngineChoice, type Tuning, torqueCurve } from './tuning.ts';
 
@@ -279,7 +281,10 @@ export class Menu {
       this.bikePicker(),
       this.colourPicker(),
     );
-    const records = m.venue && (m.mode === 'race' || m.mode === 'baja') ? recordsLine(m.venue, m.mode === 'race' ? st.laps : null) : '';
+    const venue = m.venue ?? st.freeVenue;
+    if (venue === 'supercross') setup.append(this.trackPicker(), this.stadiumPicker());
+    const trackKey = venue === 'supercross' && trackFor(st.sxTrack) ? `supercross:${trackFor(st.sxTrack)!.name}` : venue;
+    const records = m.venue && (m.mode === 'race' || m.mode === 'baja') ? recordsLine(trackKey, m.mode === 'race' ? st.laps : null) : '';
     if (records) setup.append(el('p', 'menu-foot controls-blurb', records));
     this.panel.append(setup);
 
@@ -293,6 +298,7 @@ export class Menu {
         venue: this.mode.venue ?? st.freeVenue,
         laps: st.laps, opponents: st.opponents, difficulty: st.difficulty, colour: st.colour, duration: st.duration,
         bike: st.bike,
+        sx: venue === 'supercross' ? { track: trackFor(st.sxTrack), stadium: st.sxStadium } : undefined,
       });
     });
     const back = el('button', 'menu-btn small', 'Back');
@@ -591,6 +597,35 @@ export class Menu {
   me() {
     const st = this.settings;
     return { name: st.playerName.trim().slice(0, 16) || 'Rider', colour: st.colour, bike: st.bike };
+  }
+
+  /** Supercross: which track, as a drop-down (there are a lot of them). */
+  private trackPicker() {
+    const wrap = el('div', 'setting', '<label>Track</label>');
+    const select = el('select', 'track-select') as HTMLSelectElement;
+    for (const c of trackChoices()) {
+      const o = el('option', '', c.name) as HTMLOptionElement;
+      o.value = c.id;
+      o.selected = c.id === this.settings.sxTrack;
+      select.append(o);
+    }
+    select.addEventListener('change', () => this.set({ sxTrack: select.value }));
+    wrap.append(select);
+    return wrap;
+  }
+
+  private stadiumPicker() {
+    const wrap = el('div', 'setting', '<label>Stadium</label>');
+    const select = el('select', 'track-select') as HTMLSelectElement;
+    for (const st of STADIUMS) {
+      const o = el('option', '', st.name) as HTMLOptionElement;
+      o.value = st.id;
+      o.selected = st.id === this.settings.sxStadium;
+      select.append(o);
+    }
+    select.addEventListener('change', () => this.set({ sxStadium: select.value as StadiumId }));
+    wrap.append(select);
+    return wrap;
   }
 
   private bikePicker() {

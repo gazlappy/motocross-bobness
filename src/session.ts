@@ -24,6 +24,8 @@ import { TagGame } from './tag.ts';
 import { RemoteRider, snapshot, snapshotOfRemote } from './net/remoteRider.ts';
 import { type ReplayPlayer, ReplayRecorder } from './replay.ts';
 import type { RosterEntry } from './net/protocol.ts';
+import type { SxTrack } from './sxTrack.ts';
+import type { StadiumId } from './venues/supercross.ts';
 
 // One game: the riders, their models and the event (if any) at a venue. Built when a game starts
 // and disposed when it ends, so the menu can switch games without reloading the page.
@@ -46,6 +48,8 @@ export interface SessionConfig {
   rivals?: string[];
   /** Multiplayer: who rides where, and which of them are simulated on this machine. */
   net?: NetGame;
+  /** Supercross: which track (null: the classic one) and stadium. */
+  sx?: { track: SxTrack | null; stadium: StadiumId };
 }
 
 export interface NetGame {

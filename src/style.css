@@ -209,3 +209,4 @@ body.menu-open:not(.menu-main) .menu-panel {
   position: absolute; left: 12px; top: 56px; padding: 6px 10px; border-radius: 6px; background: var(--hud-bg);
   color: var(--hud-fg); font: 12px/1.6 monospace; white-space: pre;
 }
+.track-select { background: #2a1d12; color: var(--hud-fg); border: 1px solid rgba(255, 255, 255, 0.25); border-radius: 4px; padding: 4px 6px; font: inherit; font-size: 14px; max-width: 60%; }

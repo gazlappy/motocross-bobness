@@ -3,6 +3,7 @@ import type { BikeColour } from './gltfBikeModel.ts';
 import type { VenueId } from './venue.ts';
 import type { BikeId } from './bikes.ts';
 import { DEFAULT_TUNING, type Tuning } from './tuning.ts';
+import type { StadiumId } from './venues/supercross.ts';
 
 // Player options and the last race setup, kept in the browser between visits. Storage can be
 // unavailable (private windows, blocked site data), so every read and write is best-effort.
@@ -41,6 +42,9 @@ export interface Settings {
   retro: boolean;
   /** The garage: engine curve, springs, damping and traction. */
   tuning: Tuning;
+  /** Supercross: which track ('classic', 'season:N' or 'user:name') and stadium. */
+  sxTrack: string;
+  sxStadium: StadiumId;
   /** Which defaults these settings have seen (see loadSettings). */
   version: number;
 }
@@ -67,6 +71,8 @@ export const DEFAULT_SETTINGS: Settings = {
   bikeModel: 'crf450',
   retro: true,
   tuning: { ...DEFAULT_TUNING },
+  sxTrack: 'classic',
+  sxStadium: 'square-night',
   version: 2,
 };
 
