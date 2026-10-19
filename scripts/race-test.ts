@@ -12,6 +12,7 @@ import type { Competition } from '../src/competition.ts';
 import type { Ground } from '../src/venue.ts';
 import { nationalsGround } from '../src/venues/nationals.ts';
 import { supercrossGround } from '../src/venues/supercross.ts';
+import { randomTrack } from '../src/sxTrack.ts';
 import { bajaGround } from '../src/venues/baja.ts';
 import { BIKES, type BikeId } from '../src/bikes.ts';
 
@@ -19,7 +20,8 @@ await RAPIER.init();
 const laps = Number(process.argv[2] ?? 1);
 const venueId = process.argv[3] ?? 'nationals';
 const spec = BIKES[(process.argv[4] ?? '250') as BikeId];
-const ground: Ground = venueId === 'supercross' ? supercrossGround() : venueId === 'baja' ? bajaGround() : nationalsGround();
+// 'sx3' = a generated supercross track (seed 3).
+const ground: Ground = venueId.startsWith('sx') ? supercrossGround({ track: randomTrack(Number(venueId.slice(2))) }) : venueId === 'supercross' ? supercrossGround() : venueId === 'baja' ? bajaGround() : nationalsGround();
 const hm = ground.hm;
 const world = new RAPIER.World({ x: 0, y: -9.81, z: 0 });
 const DT = 1 / 120;
@@ -36,7 +38,7 @@ names.forEach((name, i) => {
   const [pos, yaw] = ground.grid(i);
   const player = new Player(world, hm, pos, yaw, spec);
   player.track = hm.track;
-  player.cannonEnabled = venueId !== 'supercross';
+  player.cannonEnabled = venueId !== 'supercross' && !venueId.startsWith('sx');
   sim.players.push(player);
   event.add(name, player, false);
   const racer = event.racers[i];

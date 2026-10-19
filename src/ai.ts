@@ -95,7 +95,11 @@ export class AIDriver implements Driver {
 
     // Steer at a point ahead on our lane, further ahead the faster we go.
     const ahead = this.track.sample(this.s + 9 + Math.max(0, v) * 0.8);
-    const tx = ahead.x + ahead.tz * this.lane, tz = ahead.z - ahead.tx * this.lane;
+    // Through a hairpin tighter than the lanes are wide, everyone takes the middle.
+    let tightest = 0;
+    for (let d = 0; d <= 12; d += 3) tightest = Math.max(tightest, Math.abs(this.track.sample(this.s + d).curvature));
+    const lane = this.lane * (1 - THREE.MathUtils.smoothstep(tightest, 0.05, 0.15));
+    const tx = ahead.x + ahead.tz * lane, tz = ahead.z - ahead.tx * lane;
     const r = bike.body.rotation();
     _q.set(r.x, r.y, r.z, r.w).invert();
     const local = _f.set(tx - t.x, 0, tz - t.z).applyQuaternion(_q);

@@ -6,18 +6,20 @@ import * as THREE from 'three';
 import { rapierHeights, sampleHeight } from '../src/heightmap.ts';
 import { nationalsGround } from '../src/venues/nationals.ts';
 import { supercrossGround } from '../src/venues/supercross.ts';
+import { randomTrack } from '../src/sxTrack.ts';
 import { Player } from '../src/player.ts';
 import { BIKES, type BikeId } from '../src/bikes.ts';
 
 await RAPIER.init();
 // Usage: node scripts/jump-speeds.ts [nationals|supercross]
-const ground = process.argv[2] === 'supercross' ? supercrossGround() : nationalsGround();
+const arg = process.argv[2] ?? '';
+const ground = arg.startsWith('sx') ? supercrossGround({ track: randomTrack(Number(arg.slice(2))) }) : arg === 'supercross' ? supercrossGround() : nationalsGround();
 const spec = BIKES[(process.argv[3] ?? '250') as BikeId];
 const hm = ground.hm;
 const track = hm.track!;
 const DT = 1 / 120;
 // Supercross straights are short: start closer to the jump there.
-const RUN_IN = process.argv[2] === 'supercross' ? 15 : 35;
+const RUN_IN = arg === 'supercross' || arg.startsWith('sx') ? 15 : 35;
 
 function attempt(jumpS: number, speed: number, groupEnd: number) {
   const world = new RAPIER.World({ x: 0, y: -9.81, z: 0 });

@@ -55,17 +55,19 @@ const RUN_UPS = [40, 25, 15];
 function safeRestart(track: Track, s: number) {
   const L = track.length;
   const flat = (x: number) => track.jumpProfile((((x % L) + L) % L)) < 0.05;
+  // Not in a tight turn either (supercross hairpins), where a bike put down sideways falls over.
+  const straight = (x: number) => Math.abs(track.sample(x).curvature) < 0.03;
   for (const runUp of RUN_UPS) {
     let at = s - 4;
     for (let back = 0; back < 200; back++, at--) {
-      let clear = true;
+      let clear = straight(at);
       for (let d = -6; d <= runUp && clear; d += 2) clear = flat(at + d);
       if (clear) return at;
     }
   }
   let at = s - 4;
-  // No flat stretch nearby at all: settle for just being off the jumps.
-  for (let back = 0; back < 120 && !flat(at); back++) at--;
+  // No flat stretch nearby at all: settle for being off the jumps and out of the turns.
+  for (let back = 0; back < 160 && !(flat(at) && straight(at)); back++) at--;
   return at;
 }
 
@@ -161,7 +163,8 @@ export class Player {
     const hit = this.track?.nearest(at.x, at.z, 400);
     if (!this.track || !hit) return [at, yaw];
     const p = this.track.sample(safeRestart(this.track, hit.s));
-    const lane = THREE.MathUtils.clamp(this.lane, -4, 4);
+    const edge = Math.min(4, this.track.halfWidth * 0.5);
+    const lane = THREE.MathUtils.clamp(this.lane, -edge, edge);
     return [new THREE.Vector3(p.x + p.tz * lane, at.y, p.z - p.tx * lane), Math.atan2(-p.tx, -p.tz)];
   }
 
