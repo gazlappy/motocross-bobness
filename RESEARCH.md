@@ -248,6 +248,13 @@ which look like misprints for back+right and back+left):
 - Gas with your weight back, or uphill, and you wheelie, loop it, or slide off the back.
 - Uphill: weight forward and centred. Downhill: weight back. After take-off on doubles: weight forward.
 - Uneven landings: weight slightly forward, then back. Level landings: centred.
+- Turns, two ways: the **power slide** (aim for the inside, hit the brakes, then the throttle to
+  bring the tail around: shorter, but slower out) or the **outside line** (lean in, carry speed,
+  gas on the way out). "Lean into turns and keep the throttle wide open."
+- More gas makes the bike easier to control and keeps it going straight, "to a point".
+- Tyres: the rear gripping helps the front track and makes steering easier (the traction slider).
+- Reviews say little more: "very responsive", best with a joystick or pad. No strategy guides
+  survive online (GameFAQs has none).
 
 ### Open maps and boundaries
 - Every outdoor map (Nationals, Baja, Stunt Quarry) uses the same big terrain format; Baja and
@@ -272,13 +279,32 @@ which look like misprints for back+right and back+left):
 | Gears | 5; auto-shifts at road speeds of 15, 28, 41, 52, 65 mph; 0.05 s per shift; indoor gearing ~17% shorter | 5; shifts on road-speed rpm, 0.25 s |
 | Top speed | capped at 109 mph (drag is tiny) | 85 mph (drag-limited) |
 | Lean | max 40°, 120°/s | ~47°, 143°/s |
-| Steering lock | 36° | 35.5° |
-| Cornering | sideways (static) friction 6.0, sliding 0.15: the bike turns on its bars, lean is mostly for show | classic: sideways grip 2.1 (Easy 1.8) on top of the lean, ~1.35 g turns, rear held in line, no brake-lock slides; realistic: lean-limited, ~0.65 g |
+| Steering lock | 36° × the Options steering-sensitivity slider (0.7-0.9, default 0.8): about 29° | 35.5° |
+| Cornering | tyre friction 6.0 sideways / 0.15 along the wheel at the front, **one tenth (0.6) sideways at the rear** (see below) | classic: sideways grip 2.1 (Easy 1.8) on top of the lean, ~1.5 g turns, back end stopped at 23° out; realistic: lean-limited, ~0.65 g |
 | Suspension | front 0.30 m travel, 14.6 kN/m + cubic; rear 0.21 m, 8.8 kN/m + cubic; garage sliders ±10-20% | 0.42 m both, 6.2 kN/m + progressive bump stop |
 | Brakes | 778 N total (≈ 0.43 g) | 1,700 N front + 850 N rear |
 | Traction | slider 0.85-1.0 (default 0.95); full grip only above 13.7 m/s | μ 1.15 (classic) / 0.95 (realistic) |
 | Crash limits | lean 70°, pitch 85°, 6 g acceleration / 25 g deceleration | landing-based: 16 m/s impact, nose-down 46°, roll 60° |
 | Wheelies | animation at 0.24 m / 0.55 m front-wheel lift | — |
+
+### How the original turns (from its code)
+The retail `MCM.EXE` has the bike file's values built in as defaults (the bike constructor at
+0x4A2100 sets all of them; `tools/mcm-reference/bike_code.py` prints them), so the table above is
+what the released game ran. Reading the physics code:
+- **Lean is set, not balanced.** Each step the bike body is rotated about its own axis towards a
+  target lean of steer × (0.05 × speed in ft/s + 0.2 × another term), clamped to 40°, with at
+  least 5° whenever you steer. It moves at 120°/s at most (80% of that in one case not yet
+  identified). So at full steer the bike is fully leaned from about 10 mph, and nothing makes it
+  fall over or stand up.
+- **Handlebars**: full lock is 36° × the steering-sensitivity setting, 29° by default.
+- **Tyre friction** (0x4B1870 rear, 0x4B1960 front): with θ the angle between a wheel's heading
+  and the direction it's sliding, the coefficient is 6.0·sinθ + 0.15·cosθ at the front (times the
+  traction slider, 0.85-1.0), and 0.6·sinθ + 0.15·cosθ at the rear. The front grips sideways ten
+  times harder than the rear. The force pushes against the slide, so a sliding bike scrubs speed
+  fast: the manual's power slide (brake, then gas to swing the tail round).
+- Not yet traced: exactly how the friction becomes yaw (what it's scaled by, and whether velocity
+  is also turned towards the wheels directly). Following it further means reading the main
+  physics step (around 0x4A7800-0x4A8640).
 
 ## 6. Still to find
 - Terrain heights (the .TRN tile compression), which would give the walls and hills exactly.

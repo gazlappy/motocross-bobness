@@ -9,11 +9,14 @@ feel. **Nothing they read or write is committed or shipped**: extract the disc i
 "/c/Program Files/7-Zip/7z.exe" x -oreference/mcm-disc "assets/Disc image/MCM.iso"
 python -I tools/mcm-reference/track_dat.py reference/mcm-disc/GAME/TERAFORM/NATIONAL/*.DAT
 python -I tools/mcm-reference/vub.py reference/mcm-disc/GAME/SBIKE/SUPRMAN.VUB reference/mcm-disc/GAME/SBIKE/RIDER.VUT
+python -I tools/mcm-reference/bike_code.py reference/mcm-disc/GAME/MCM.EXE
 python -I tools/mcm-reference/trn_layout.py reference/mcm-disc/GAME/TERAFORM/NATIONAL/TRACK01.TRN
 ```
 
 - `track_dat.py`: track centrelines (`.DAT`), units in feet.
 - `vub.py`: rider/bike animations (`.VUB`), bone order from `RIDER.VUT` / `BIKE.VUT`.
+- `bike_code.py`: disassembles the bike physics in `MCM.EXE` (its built-in settings, and any
+  code range); needs `pip install capstone pefile`.
 - `trn_layout.py`: walks a terrain (`.TRN`) and prints its block layout; the height tiles are
   compressed with a scheme not yet decoded.
 
