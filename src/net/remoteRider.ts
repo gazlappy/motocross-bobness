@@ -49,6 +49,58 @@ function lerpAngle(a: number, b: number, k: number) {
   return a + d * k;
 }
 
+/** A rider's state between two snapshots (network play and replays both draw from these). */
+export interface SnapshotState {
+  pos: THREE.Vector3;
+  rot: THREE.Quaternion;
+  vel: THREE.Vector3;
+  wheels: { rayLength: number; spin: number }[];
+  pose: RiderPose;
+  steer: number;
+  rpm: number;
+  throttle: number;
+  crashed: boolean;
+  score: number;
+}
+
+/** Blend snapshots `a` and `b` (k = 0..1 between them) into `out`. */
+export function readSnapshot(a: ArrayLike<number>, b: ArrayLike<number>, k: number, out: SnapshotState) {
+  const lerp = (i: number) => a[i] + (b[i] - a[i]) * k;
+  out.pos.set(lerp(P), lerp(P + 1), lerp(P + 2));
+  _qa.set(a[Q], a[Q + 1], a[Q + 2], a[Q + 3]);
+  _qb.set(b[Q], b[Q + 1], b[Q + 2], b[Q + 3]);
+  out.rot.copy(_qa).slerp(_qb, k);
+  out.vel.set(lerp(V), lerp(V + 1), lerp(V + 2));
+  out.steer = lerp(STEER);
+  out.rpm = lerp(RPM);
+  out.throttle = lerp(THROTTLE);
+  const [f, r] = out.wheels;
+  f.rayLength = lerp(WHEELS);
+  f.spin = lerpAngle(a[WHEELS + 1], b[WHEELS + 1], k);
+  r.rayLength = lerp(WHEELS + 2);
+  r.spin = lerpAngle(a[WHEELS + 3], b[WHEELS + 3], k);
+  out.crashed = b[CRASHED] === 1;
+  out.score = b[SCORE];
+  POSE_JOINTS.forEach((j, n) => {
+    const i = JOINTS + n * 3;
+    out.pose[j].set(lerp(i), lerp(i + 1), lerp(i + 2));
+  });
+  _qa.set(a[HEAD_ROT], a[HEAD_ROT + 1], a[HEAD_ROT + 2], a[HEAD_ROT + 3]);
+  _qb.set(b[HEAD_ROT], b[HEAD_ROT + 1], b[HEAD_ROT + 2], b[HEAD_ROT + 3]);
+  out.pose.headRot.copy(_qa).slerp(_qb, k);
+}
+
+/** Pack a network rider's current (drawn) state the same way, for replays. */
+export function snapshotOfRemote(r: RemoteRider, now: number): number[] {
+  const b = r.bike, t = b.body.translation(), q = b.body.rotation(), v = b.body.linvel();
+  const [f, w] = b.wheels;
+  const s = [now, t.x, t.y, t.z, q.x, q.y, q.z, q.w, v.x, v.y, v.z, b.steerAngle, r.rpm, r.throttle,
+    f.rayLength, f.spin, w.rayLength, w.spin, r.crashed ? 1 : 0, r.stunts.total];
+  for (const j of POSE_JOINTS) s.push(r.pose[j].x, r.pose[j].y, r.pose[j].z);
+  s.push(r.pose.headRot.x, r.pose.headRot.y, r.pose.headRot.z, r.pose.headRot.w);
+  return s;
+}
+
 export class RemoteRider {
   readonly id: string;
   readonly spec: BikeSpec;
@@ -64,6 +116,7 @@ export class RemoteRider {
   private rot = new THREE.Quaternion();
   private vel = new THREE.Vector3();
   private wheels = [-0.82, 0.66].map((z) => ({ attach: new THREE.Vector3(0, 0.12, z), rayLength: 0.6, spin: 0 }));
+  private state: SnapshotState;
   crashed = false;
   rpm = 0;
   throttle = 0;
@@ -89,6 +142,7 @@ export class RemoteRider {
       this.kinematic,
     );
     const pos = this.pos, rot = this.rot, vel = this.vel;
+    this.state = { pos, rot, vel, wheels: this.wheels, pose: this.pose, steer: 0, rpm: 0, throttle: 0, crashed: false, score: 0 };
     this.bike = {
       body: { translation: () => pos, rotation: () => rot, linvel: () => vel },
       wheels: this.wheels,
@@ -132,38 +186,22 @@ export class RemoteRider {
       b = buf[i];
       k = (t - a[T]) / Math.max(1, b[T] - a[T]);
     }
-    const lerp = (i: number) => a[i] + (b[i] - a[i]) * k;
-    this.pos.set(lerp(P), lerp(P + 1), lerp(P + 2));
-    _qa.set(a[Q], a[Q + 1], a[Q + 2], a[Q + 3]);
-    _qb.set(b[Q], b[Q + 1], b[Q + 2], b[Q + 3]);
-    this.rot.copy(_qa).slerp(_qb, k);
-    this.vel.set(lerp(V), lerp(V + 1), lerp(V + 2));
+    const st = this.state;
+    readSnapshot(a, b, k, st);
     // Past the newest snapshot: carry on along their velocity for a moment.
     const ahead = a === b ? Math.min(MAX_EXTRAPOLATE, (t - a[T]) / 1000) : 0;
-    if (ahead > 0) this.pos.addScaledVector(this.vel, ahead);
-
-    this.bike.steerAngle = lerp(STEER);
-    this.rpm = lerp(RPM);
-    this.throttle = lerp(THROTTLE);
-    this.bike.throttle = this.throttle;
-    const [f, r] = this.wheels;
-    f.rayLength = lerp(WHEELS);
-    f.spin = lerpAngle(a[WHEELS + 1], b[WHEELS + 1], k);
-    r.rayLength = lerp(WHEELS + 2);
-    r.spin = lerpAngle(a[WHEELS + 3], b[WHEELS + 3], k);
-    this.crashed = b[CRASHED] === 1;
-    this.stunts.total = b[SCORE];
+    if (ahead > 0) {
+      this.pos.addScaledVector(this.vel, ahead);
+      for (const j of POSE_JOINTS) this.pose[j].addScaledVector(this.vel, ahead);
+    }
+    this.bike.steerAngle = st.steer;
+    this.rpm = st.rpm;
+    this.throttle = st.throttle;
+    this.bike.throttle = st.throttle;
+    this.crashed = st.crashed;
+    this.stunts.total = st.score;
     const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(this.rot);
     this.bike.speed = this.vel.dot(fwd);
-
-    POSE_JOINTS.forEach((j, n) => {
-      const i = JOINTS + n * 3;
-      this.pose[j].set(lerp(i), lerp(i + 1), lerp(i + 2));
-      if (ahead > 0) this.pose[j].addScaledVector(this.vel, ahead);
-    });
-    _qa.set(a[HEAD_ROT], a[HEAD_ROT + 1], a[HEAD_ROT + 2], a[HEAD_ROT + 3]);
-    _qb.set(b[HEAD_ROT], b[HEAD_ROT + 1], b[HEAD_ROT + 2], b[HEAD_ROT + 3]);
-    this.pose.headRot.copy(_qa).slerp(_qb, k);
 
     // Only a moving bike is solid. This proxy can't be pushed, so a stopped or crashed one would be a
     // wall you get stuck on (and on their screen, your proxy would bulldoze them).

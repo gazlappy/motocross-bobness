@@ -2,7 +2,7 @@ import { BIKE_COLOURS, type BikeColour } from './gltfBikeModel.ts';
 import { KIT_COLOURS, type SessionConfig, rivalsFor } from './session.ts';
 import { type Difficulty, type Settings, saveSettings } from './settings.ts';
 import type { VenueId } from './venue.ts';
-import { ordinal } from './format.ts';
+import { clockText, ordinal } from './format.ts';
 import { BIKES, BIKE_IDS, type BikeId, type BikeSpec } from './bikes.ts';
 import {
   type Career, SEASON, TIERS, YOU, buyBike, canEnter, currentEvent, money, newCareer, rideBike, saveCareer, standings, startSeason,
@@ -15,6 +15,7 @@ import {
 } from './bindings.ts';
 import { type StuntDir, activePad } from './input.ts';
 import { STUNT_LIST } from './stunts.ts';
+import { recordsFor } from './records.ts';
 import { DEFAULT_TUNING, ENGINES, type EngineChoice, type Tuning, torqueCurve } from './tuning.ts';
 
 // The front end: main menu over the attract-mode race, game select, options, credits, pause and
@@ -32,6 +33,8 @@ export interface MenuHandlers {
   toCareer(): void;
   /** Leave the multiplayer room (from a game or the lobby). */
   leaveRoom(): void;
+  /** Watch a replay of the game so far. */
+  replay(): void;
 }
 
 type Screen = 'main' | 'select' | 'options' | 'credits' | 'pause' | 'results' | 'career' | 'garage' | 'tuning' | 'multiplayer' | 'lobby' | 'controls';
@@ -130,6 +133,11 @@ export class Menu {
     this.resultsTitle = title;
     this.resultsCareer = career;
     this.open('results', true);
+  }
+
+  /** Back to a screen after a replay. */
+  reopen(screen: 'results' | 'pause') {
+    this.open(screen, true);
   }
 
   showCareer() {
@@ -270,6 +278,8 @@ export class Menu {
       this.bikePicker(),
       this.colourPicker(),
     );
+    const records = m.venue && (m.mode === 'race' || m.mode === 'baja') ? recordsLine(m.venue, m.mode === 'race' ? st.laps : null) : '';
+    if (records) setup.append(el('p', 'menu-foot controls-blurb', records));
     this.panel.append(setup);
 
     const row = el('div', 'menu-row');
@@ -369,6 +379,7 @@ export class Menu {
         this.h.restart();
       });
     }
+    this.button('Watch replay', () => this.h.replay());
     this.button('Options', () => this.open('options'));
     if (net && this.lobby.isHost) this.button('End game for everyone', () => this.lobby.end());
     this.button(net ? 'Leave the room' : 'Quit to menu', () => (net ? this.h.leaveRoom() : this.h.quit()));
@@ -379,6 +390,7 @@ export class Menu {
     this.panel.append(el('div', 'results-table', this.resultsHtml));
     if (this.resultsCareer) {
       this.button('Continue', () => this.h.toCareer(), 'menu-btn go');
+      this.button('Watch replay', () => this.h.replay());
       return;
     }
     if (this.lobby.room) {
@@ -391,6 +403,7 @@ export class Menu {
       this.hide();
       this.h.restart();
     });
+    this.button('Watch replay', () => this.h.replay());
     this.button('Main menu', () => this.h.quit());
   }
 
@@ -1019,6 +1032,16 @@ function stuntTable(b: Bindings) {
     `<p class="menu-foot controls-blurb">In the air, hold a stunt button and lean to pick a stunt; hold it longer for more points, ` +
     `and tuck back in before you land. ${b.keys.dumpster.map(keyName).join('/')}: Big Kahuna Dumpster (a Skurfer, then you leap off the bike: save it for after the finish). ` +
     `${b.keys.taunt.map(keyName).join('/')}: taunt.</p>`);
+}
+
+/** Your records at a track, for the event screen. */
+function recordsLine(track: string, laps: number | null) {
+  const r = recordsFor(track);
+  const parts: string[] = [];
+  if (laps !== null && r.lap !== undefined) parts.push(`lap ${clockText(r.lap)}`);
+  const best = laps === null ? r.baja : r.race?.[String(laps)];
+  if (best !== undefined) parts.push(`${laps === null ? 'course' : `${laps}-lap race`} ${clockText(best)}`);
+  return parts.length ? `Your records here: ${parts.join(' · ')}` : '';
 }
 
 function shortBike(id: BikeId) {

@@ -21,7 +21,8 @@ import type { Difficulty } from './settings.ts';
 import type { Venue, VenueId } from './venue.ts';
 import { BIKES, type BikeId, type BikeSpec } from './bikes.ts';
 import { TagGame } from './tag.ts';
-import { RemoteRider, snapshot } from './net/remoteRider.ts';
+import { RemoteRider, snapshot, snapshotOfRemote } from './net/remoteRider.ts';
+import { type ReplayPlayer, ReplayRecorder } from './replay.ts';
 import type { RosterEntry } from './net/protocol.ts';
 
 // One game: the riders, their models and the event (if any) at a venue. Built when a game starts
@@ -117,6 +118,8 @@ export class Session {
   readonly config: SessionConfig;
   readonly venue: Venue;
   readonly sim: Sim;
+  /** Everything that happens, for replays. */
+  readonly recorder = new ReplayRecorder();
   readonly event: Competition | null;
   readonly entries: Entry[] = [];
   readonly remotes: RemoteEntry[] = [];
@@ -289,6 +292,31 @@ export class Session {
     for (const r of this.remotes) r.rider.update(now);
     this.sim.step(controls, dt);
     if (!this.waiting) this.event?.update(dt);
+    if (this.config.mode !== 'attract' && this.recorder.due(dt)) {
+      this.recorder.add([
+        ...this.entries.map((e) => snapshot(e.player, e.player.readPose(), 0)),
+        ...this.remotes.map((r) => snapshotOfRemote(r.rider, 0)),
+      ]);
+    }
+  }
+
+  /** Replays: every rider's models, in the order the recording holds them, and whose is yours. */
+  replayModels() {
+    return [...this.entries, ...this.remotes].map((e) => ({ bikeModel: e.bikeModel, riderModel: e.riderModel }));
+  }
+
+  get replayFocus() {
+    return Math.max(0, this.human ? this.entries.indexOf(this.human) : this.entries.indexOf(this.star));
+  }
+
+  /** Pose every rider's model from a replay instead of the physics. */
+  showReplay(replay: ReplayPlayer) {
+    this.replayModels().forEach((m, i) => {
+      const r = replay.riders[i];
+      if (!r) return;
+      m.bikeModel.update(r.view);
+      m.riderModel.setPose(r.pose);
+    });
   }
 
   /** Per rendered frame, before drawing: crash timers and respawns. */

@@ -20,6 +20,8 @@ import { setTerrainStyle } from './terrain.ts';
 import { DirtParticles } from './particles.ts';
 import { type EventPayout, SEASON, TIERS, eventConfig, loadCareer, money, recordEvent } from './career.ts';
 import { TagGame } from './tag.ts';
+import { recordFinish, recordLap, recordsFor } from './records.ts';
+import { ReplayPlayer } from './replay.ts';
 import { Lobby } from './net/lobby.ts';
 import type { NetSetup, RosterEntry } from './net/protocol.ts';
 import type { Racer } from './competition.ts';
@@ -85,6 +87,7 @@ const hud = {
   trick: document.getElementById('trick')!,
   race: document.getElementById('race')!,
   loading: document.getElementById('loading')!,
+  replay: document.getElementById('replay')!,
 };
 
 // ---- Venues ---------------------------------------------------------------------------------------
@@ -210,13 +213,19 @@ const career = loadCareer();
 /** The game running is a career event: its result goes on the career. */
 let careerRun = false;
 let careerSummary = '';
+/** Track records shown under the results. */
+let recordSummary = '';
 /** Under the countdown numbers: which career event this is. */
 let countdownCaption = '';
 let lastCount = -1;
 let resultsTimer = 0;
+/** Watching a replay (the game itself is frozen meanwhile), and which screen to go back to. */
+let replay: ReplayPlayer | null = null;
+let replayFrom: 'results' | 'pause' = 'results';
 
 /** Tear down whatever is running and start a game (or the menu's attract mode). */
 async function begin(config: SessionConfig) {
+  stopReplay(false);
   session?.dispose();
   clearTimeout(resultsTimer);
   useVenue(await getVenue(config.venue));
@@ -267,10 +276,13 @@ function attachHud() {
 
   const event = session.event;
   if (!event) return;
+  const track = recordKey(session.config);
+  recordSummary = '';
   event.onLap = (r, lap, time) => {
-    if (r.human && event instanceof Race && lap < event.laps) {
-      flashBanner(`LAP ${lap + 1}<small>${clockText(time)}</small>`, 1500);
-    }
+    if (!r.human || !(event instanceof Race)) return;
+    const record = recordLap(track, time);
+    if (lap < event.laps) flashBanner(`${record ? 'LAP RECORD!' : `LAP ${lap + 1}`}<small>${clockText(time)}</small>`, 1500);
+    else if (record) flashBanner(`LAP RECORD!<small>${clockText(time)}</small>`, 1500);
   };
   if (event instanceof TagGame) {
     event.onTag = (it, by) => {
@@ -294,6 +306,10 @@ function attachHud() {
       const order = event instanceof StuntChallenge ? null : event.standings().map((x) => x.name);
       careerSummary = payoutHtml(recordEvent(career, order, p.stunts.total));
     }
+    if (r.human && (event instanceof Race || event instanceof BajaRace)) {
+      const record = recordFinish(track, r.finishTime, event instanceof Race ? event.laps : null);
+      recordSummary = recordsHtml(track, event instanceof Race ? event.laps : null, record);
+    }
     if (r.human) {
       const msg = event instanceof StuntChallenge
         ? `TIME UP!<small>${p.stunts.total.toLocaleString()} points${event.newBest ? ' · new best!' : ''}</small>`
@@ -304,13 +320,28 @@ function attachHud() {
       sound.cheer(1);
       resultsTimer = window.setTimeout(() => {
         const t = tableHtml(event.results());
-        menu.showResults(t.html + careerSummary, t.title, careerSummary !== '');
+        menu.showResults(t.html + recordSummary + careerSummary, t.title, careerSummary !== '');
       }, 2700);
     } else if (menu.screenName === 'results') {
       const t = tableHtml(event.results());
-      menu.showResults(t.html + careerSummary, t.title, careerSummary !== '');
+      menu.showResults(t.html + recordSummary + careerSummary, t.title, careerSummary !== '');
     }
   };
+}
+
+/** Which track records a game counts towards: the venue (and its track, where there's a choice). */
+function recordKey(config: SessionConfig) {
+  return config.venue;
+}
+
+/** The records for a track, under the results. */
+function recordsHtml(track: string, laps: number | null, newRecord: boolean) {
+  const r = recordsFor(track);
+  const lines: string[] = [];
+  if (laps !== null && r.lap !== undefined) lines.push(`Lap record: <b>${clockText(r.lap)}</b>`);
+  const best = laps === null ? r.baja : r.race?.[String(laps)];
+  if (best !== undefined) lines.push(`${laps === null ? 'Course' : `${laps}-lap`} record: <b>${clockText(best)}</b>${newRecord ? ' · <b>NEW!</b>' : ''}`);
+  return lines.length ? `<div class="career-payout">${lines.map((l) => `<p>${l}</p>`).join('')}</div>` : '';
 }
 
 function announceTag(it: Racer, by: Racer | null) {
@@ -489,7 +520,46 @@ const menu = new Menu(document.getElementById('menu')!, settings, career, lobby,
     void goToMenu();
   },
   settingsChanged: applySettings,
+  replay() {
+    if (session.recorder.length < 20) {
+      flashBanner('NO REPLAY<small>nothing recorded yet</small>', 1200);
+      return;
+    }
+    replayFrom = menu.screenName === 'pause' ? 'pause' : 'results';
+    replay = new ReplayPlayer(session.recorder.recording(), session.replayFocus);
+    menu.hide();
+    rig.setMode('thrill');
+    hud.replay.hidden = false;
+  },
 });
+
+/** Leave a replay, back to the screen it was started from. */
+function stopReplay(reopen = true) {
+  if (!replay) return;
+  replay = null;
+  hud.replay.hidden = true;
+  rig.setMode(session?.config.mode === 'attract' ? 'thrill' : settings.camera);
+  if (reopen) menu.reopen(replayFrom);
+}
+
+// Replay controls: Space pauses, Left/Right skip 5 s, N follows the next rider (C and Esc as in a game).
+addEventListener('keydown', (e) => {
+  if (!replay) return;
+  if (e.code === 'Space') replay.paused = !replay.paused;
+  else if (e.code === 'ArrowLeft') replay.seek(replay.time - 5);
+  else if (e.code === 'ArrowRight') replay.seek(replay.time + 5);
+  else if (e.code === 'KeyN') {
+    replay.focus = (replay.focus + 1) % replay.riders.length;
+    rig.setMode(rig.mode);
+  } else return;
+  e.preventDefault();
+});
+
+function updateReplayHud(r: ReplayPlayer) {
+  const t = r.time - r.start;
+  hud.replay.innerHTML = `REPLAY <b>${clockText(t)}</b> / ${clockText(r.duration)}${r.paused ? ' &nbsp; PAUSED' : ''}` +
+    ` &nbsp; <small>Space pause · ←/→ skip · C camera · N next rider · Esc back</small>`;
+}
 
 // ---- Multiplayer ----------------------------------------------------------------------------------
 
@@ -585,6 +655,10 @@ function frame(now: number) {
   const running = !me || !menu.visible || menu.screenName === 'results' || net;
   const playing = me !== null && !menu.visible;
 
+  if (replay) {
+    frameReplay(replay, dt);
+    return;
+  }
   for (const a of input.takeActions()) {
     if (a === 'pause') {
       if (me) menu.togglePause();
@@ -686,6 +760,31 @@ function frame(now: number) {
   }
 }
 requestAnimationFrame(frame);
+
+/** A frame of replay: the game stays frozen; the models follow the recording. */
+function frameReplay(r: ReplayPlayer, dt: number) {
+  for (const a of input.takeActions()) {
+    if (a === 'pause') stopReplay();
+    else if (a === 'camera') rig.cycle();
+  }
+  if (!replay) return;
+  arrow.visible = false;
+  itMarker.visible = false;
+  r.advance(dt);
+  if (r.finished && !r.paused) r.paused = true;
+  session.showReplay(r);
+  const view = r.riders[r.focus].view;
+  // The camera takes the replay rider for a bike: it only reads its position, heading and speed.
+  rig.update(view as unknown as Parameters<CameraRig['update']>[0], dt, null);
+  const t = view.body.translation();
+  sun.position.set(t.x, t.y, t.z).add(venue.atmosphere.sun.offset);
+  sun.target.position.set(t.x, t.y, t.z);
+  sound.update(null, camera);
+  hud.speed.textContent = String(Math.round(Math.abs(view.speed) * (settings.units === 'kmh' ? 3.6 : 2.237)));
+  updateReplayHud(r);
+  dirt.setView(camera, renderer.domElement.height);
+  renderer.render(scene, camera);
+}
 
 // Handy for poking at the sim from the dev console.
 Object.assign(window, { game: { get session() { return session; }, get venue() { return venue; }, world, interp, lobby, rig: () => rig, sound, scene, menu, settings, venues, renderer } });
